@@ -1,0 +1,1 @@
+inline int add(const int& val) noexcept { return val+1; }
