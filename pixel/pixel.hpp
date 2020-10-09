@@ -44,6 +44,53 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+
+		SAMPLE PROGRAM:
+		~~~~~~~~~~~~~~~~~
+
+		The folowing program will create a wimple application window and draw 50 random
+		lines (color and position) every frame.
+
+		#include <iostream>
+
+		#include <pixel/pixel.hpp>
+		using namespace pixel;
+
+		int main() {
+		  Application app({.size = vu2d(500, 500), .name = "Lines",
+		  .on_update = [] (Application& app) mutable -> pixel::rcode {
+		    for (uint8_t i = 0; i < 50; i++) {
+		      app.DrawLine(
+		        vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
+						vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
+						RandPixel()
+		      );
+		    }
+
+		    if(app.KeyboardKey(Key::ESCAPE).pressed) {
+					app.Close();
+				}
+
+		    return pixel::ok;
+		  }});
+
+		  app.Launch();
+
+		  return 0;
+		}
+
+		COMPILING:
+		~~~~~~~~~
+
+		Only linux systems are supported at this moment, but support for MacOS and windows
+		will come in the future. To compile under linux you will need a modern C++ compiler,
+		as this library makes use of C++20 features, so update your compiler if you haven't
+		already. This library has only been tested with GCC, so CLANG builds might not work
+		correctly. To compile simply run:
+
+			g++ -o YourProgramName YourProgramName.cpp -lX11 -lGL -lpthread -lpng -std=c++20 -O2 \
+		      -I. -Wall -pedantic-errors && ./YourProgramName
+
 */
 
 #pragma once
@@ -73,21 +120,16 @@
 #define PIXEL_VERSION_PATCH 0
 
 #define IGNORE(x) (void(x))
-#define IGNORE_BAD_CALL(expr) (try(expr;)catch(std::bad_function_call e){})
 
 #include <string>
-#include <cstring>
 #include <chrono>
 #include <map>
-#include <algorithm>
 #include <istream>
 #include <atomic>
 #include <vector>
-#include <memory>
 #include <thread>
 #include <filesystem>
-#include <functional>
-#include <version>
+
 
 /*
 ___________________________
@@ -322,7 +364,7 @@ namespace pixel {
 			uint8_t scale = 2;
 
 			std::string name = "Pixel";
-			pixel::DrawingMode mode = DrawingMode::NO_ALPHA;
+			pixel::DrawingMode mode = DrawingMode::FULL_ALPHA;
 
 			bool fullscreen = false;
 			bool vsync = false;
@@ -394,7 +436,7 @@ namespace pixel {
 		bool ShouldExist() const;
 		pixel::DrawingMode DrawingMode() const;
 
-		const vu2d& DrawableSize() const;
+		vu2d DrawableSize() const;
 		const vu2d& ScreenSize() const;
 
 		const vu2d& WindowSize() const;
@@ -942,7 +984,7 @@ namespace pixel {
 		return pDrawingMode;
 	}
 
-	const vu2d& Application::DrawableSize() const {
+	vu2d Application::DrawableSize() const {
 		return pScreenSize - 1;
 	}
 
