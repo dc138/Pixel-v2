@@ -1,5 +1,5 @@
-CXX      := c++
-CXXFLAGS := -pedantic-errors -Wall -Wextra -std=c++20 -I.
+CXX      := g++
+CXXFLAGS := -pedantic-errors -Wall -std=c++20 -I.
 LDFLAGS  := -lX11 -lGL -lpthread -lpng -lstdc++
 
 BUILD    := ./build

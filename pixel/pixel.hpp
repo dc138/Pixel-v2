@@ -76,6 +76,7 @@
 #define IGNORE_BAD_CALL(expr) (try(expr;)catch(std::bad_function_call e){})
 
 #include <string>
+#include <cstring>
 #include <chrono>
 #include <map>
 #include <algorithm>
@@ -98,7 +99,7 @@ ___________________________
 
 namespace pixel {
 
-  enum rcode { ok = 0, err = 1, file_err = 2 };
+  enum rcode { ok = 0, err = 1, file_err = 2, abort = 3 };
   class Application;
   class Sprite;
 
@@ -223,9 +224,17 @@ namespace pixel {
 
 		friend class Application;
 		friend class Renderer_OpenGL;
+		friend class ImageLoader_LibPNG;
 
   public:
     Sprite(const Sprite& other) = delete;
+
+	public:
+		Pixel GetPixel(uint32_t x, uint32_t y) const;
+		void SetPixel(uint32_t x, uint32_t y, const Pixel& p);
+
+		vu2d GetSize() const;
+		void SetSize(uint32_t w, uint32_t h);
 
 	public:
     rcode LoadFromFile(const std::string& filename);
@@ -256,17 +265,18 @@ namespace pixel {
 		virtual void DisplayFrame() = 0;
 		virtual void PrepareDrawing() = 0;
 		virtual void DrawLayerQuad() = 0;
-		virtual void DrawDecalQuad(const Sprite& decal) = 0;
+		virtual void DrawDecalQuad(const Sprite& sprite) = 0;
 
 		virtual uint32_t CreateTexture(uint32_t width, uint32_t height) = 0;
 		virtual uint32_t DeleteTexture(uint32_t id) = 0;
 		virtual void UpdateTexture(uint32_t id, Sprite* spr) = 0;
+		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) = 0;
 		virtual void ApplyTexture(uint32_t id) = 0;
 
-		virtual void UpdateViewport(const vi2d& pos, const vi2d& size) = 0;
+		virtual void UpdateViewport(const vu2d& pos, const vu2d& size) = 0;
 		virtual void ClearBuffer(Pixel p, bool depth) = 0;
 
-    static Application* App;
+    Application* App;
 	};
 
 	class Platform {
@@ -279,14 +289,14 @@ namespace pixel {
 		virtual rcode ThreadStartUp() = 0;
 		virtual rcode ThreadCleanUp() = 0;
 
-		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vi2d& viewpos, const vi2d& viewsize) = 0;
-		virtual rcode CreateWindowPane(const vi2d& winpos, vi2d& winsize, bool fullscreen) = 0;
+		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) = 0;
+		virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) = 0;
 		virtual rcode SetWindowTitle(const std::string& s) = 0;
 
 		virtual rcode StartSystemEventLoop() = 0;
 		virtual rcode HandleSystemEvent() = 0;
 
-		static Application* App;
+		Application* App;
 	};
 
   class ImageLoader {
@@ -305,23 +315,38 @@ namespace pixel {
 
   class Application final {
   public:
-    typedef rcode (*callback_function_t)(const Application&);
+    typedef rcode (*callback_t)(Application&);
+		typedef struct {
+			vu2d size = vu2d(256, 256);
+			vu2d position = vu2d(25, 25);
+			uint8_t scale = 2;
+
+			std::string name = "Pixel";
+			pixel::DrawingMode mode = DrawingMode::NO_ALPHA;
+
+			bool fullscreen = false;
+			bool vsync = false;
+
+			callback_t on_launch = nullptr;
+			callback_t on_update = nullptr;
+			callback_t on_close = nullptr;
+		} params_t;
 
   public:
-		Application(const vu2d& size, uint8_t scale, const vu2d& position, const std::string& name, DrawingMode mode = DrawingMode::NO_ALPHA, bool fullScreen = false, bool vsync = false, bool launch_thread = false);
+		Application(params_t params);
 		~Application();
 
 	public:
-		void Launch();
+		rcode Launch();
 
 	public:
 		Application(const Application& other) = delete;
 		Application& operator=(const Application& other) = delete;
 
 	public:
-    callback_function_t OnLaunch;
-    callback_function_t OnUpdate;
-    callback_function_t OnClose;
+    callback_t pOnLaunch;
+    callback_t pOnUpdate;
+    callback_t pOnClose;
 
   public:
 		void Close();
@@ -407,7 +432,7 @@ namespace pixel {
 		bool pVsync = false;
 		bool pFullScreen = false;
 
-		static std::atomic_bool pShouldExist;
+		std::atomic<bool> pShouldExist {false};
 
 	private:
 		std::map<size_t, uint8_t> pKeyMap;
@@ -422,6 +447,9 @@ namespace pixel {
 		Button pKeyboardKeys[256] = {};
 		bool pKeyboardKeysOld[256] = {};
 		bool pKeyboardKeysNew[256] = {};
+
+		bool pHasInputFocus = false;
+		bool pHasMouseFocus = false;
 
 	private:
 		std::chrono::system_clock::time_point pClock1;
@@ -490,6 +518,29 @@ namespace pixel {
     LoadFromFile(filename);
   }
 
+	Pixel Sprite::GetPixel(uint32_t x, uint32_t y) const {
+		if (x < pSize.x && y < pSize.y) {
+			return pBuffer[y * pSize.x + x];
+
+		} else {
+			return Pixel(0, 0, 0, 0);
+		}
+	}
+
+	void Sprite::SetPixel(uint32_t x, uint32_t y, const Pixel& p) {
+		if (x < pSize.x && y < pSize.y) {
+			pBuffer[y * pSize.x + x] = p;
+		}
+	}
+
+	vu2d Sprite::GetSize() const {
+		return pSize;
+	}
+
+	void Sprite::SetSize(uint32_t w, uint32_t h) {
+		pSize = vu2d(w, h);
+	}
+
   rcode Sprite::LoadFromFile(const std::string& filename) {
     return loader->LoadImage(this, filename);
   }
@@ -507,6 +558,440 @@ namespace pixel {
   }
 }
 
+namespace pixel {
+	Application::Application(Application::params_t params) {
+		pConfigureSystem();
+		
+		pWindowSize = params.size * params.scale;
+		pWindowPos = params.position;
+
+		pScreenSize = params.size;
+		pInvScreenSize = vf2d(1.0f / params.size.x, 1.0f / params.size.y);
+		pScale = params.scale;
+
+		pWindowName = params.name;
+		pWindowTittle = params.name + " - FPS: 0";
+
+		pDrawingMode = params.mode;
+
+		pVsync = params.vsync;
+		pFullScreen = params.fullscreen;
+
+		pOnLaunch = params.on_launch;
+		pOnUpdate = params.on_update;
+		pOnClose = params.on_close;
+	}
+
+	Application::~Application() {}
+
+	void Application::pEngineThread() {
+		if (platform->ThreadStartUp() == rcode::err) return;
+		if (platform->CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
+
+		ConstructFontSheet();
+
+		pBuffer = new Pixel[pScreenSize.prod()];
+		for(uint32_t i = 0; i < pScreenSize.prod(); i++) {
+      pBuffer[i] = Pixel();
+    }
+
+		pBufferId = renderer->CreateTexture(pScreenSize.x, pScreenSize.y);
+		renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+
+		pClock1 = std::chrono::system_clock::now();
+		pClock2 = std::chrono::system_clock::now();
+
+		if (pOnLaunch) {
+			if (pOnLaunch(*this) == rcode::err) pShouldExist = false;
+		}
+
+		while (pShouldExist) {
+			while (pShouldExist){
+				pUpdate();
+			}
+			
+			if (pOnClose) {
+				if (pOnClose(*this) == rcode::abort) pShouldExist = true;
+			}
+		}
+		
+		platform->ThreadCleanUp();
+	}
+
+  void Application::pUpdate() {
+		pClock2 = std::chrono::system_clock::now();
+		pElapsedTimer = pClock2 - pClock1;
+		pClock1 = pClock2;
+		pElapsedTime = pElapsedTimer.count();
+
+		pFrameTimer += pElapsedTime;
+		pFrameCount++;
+
+		platform->HandleSystemEvent();
+
+		if(pFrameTimer >= 1.0f) {
+			pFrameRate = pFrameCount;
+			pFrameTimer -= 1.0f;
+
+			pWindowTittle = pWindowName + " - FPS: " + std::to_string(pFrameRate);
+			platform->SetWindowTitle(pWindowTittle);
+
+			pFrameCount = 0;
+		}
+
+		for(uint32_t i = 0; i < 3; i++) {
+
+			pMouseButtons[i].pressed = false;
+			pMouseButtons[i].released = false;
+
+			if(pMouseButtonsNew[i] != pMouseButtonsOld[i]) {
+
+				if(pMouseButtonsNew[i]) {
+
+					pMouseButtons[i].pressed = !pMouseButtons[i].held;
+					pMouseButtons[i].held = true;
+
+				} else {
+
+					pMouseButtons[i].released = true;
+					pMouseButtons[i].held = false;
+				}
+			}
+
+			pMouseButtonsOld[i] = pMouseButtonsNew[i];
+		}
+
+		for(uint32_t i = 0; i < 256; i++) {
+
+			pKeyboardKeys[i].pressed = false;
+			pKeyboardKeys[i].released = false;
+
+			if(pKeyboardKeysNew[i] != pKeyboardKeysOld[i]) {
+
+				if(pKeyboardKeysNew[i]) {
+
+					pKeyboardKeys[i].pressed = !pKeyboardKeys[i].held;
+					pKeyboardKeys[i].held = true;
+
+				} else {
+
+					pKeyboardKeys[i].released = true;
+					pKeyboardKeys[i].held = false;
+				}
+			}
+
+			pKeyboardKeysOld[i] = pKeyboardKeysNew[i];
+		}
+
+		if (pOnUpdate) {
+			if (pOnUpdate(*this) == rcode::abort) pShouldExist = false;
+		}
+
+		renderer->UpdateViewport(pViewPos, pViewSize);
+		renderer->ClearBuffer(Black, true);
+		renderer->PrepareDrawing();
+
+		renderer->ApplyTexture(pBufferId);
+		renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+		renderer->DrawLayerQuad();
+
+		for (auto& s : pSprites) {
+			renderer->ApplyTexture(s->pBufferId);
+			renderer->DrawDecalQuad(*s);
+		}
+
+		renderer->DisplayFrame();
+	}
+
+	rcode Application::Launch() {
+		if (platform->ApplicationStartUp() != rcode::ok) return rcode::err;
+		if (platform->CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
+
+		UpdateViewport();
+		
+		pShouldExist = true;
+		std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+
+		platform->StartSystemEventLoop();
+
+		thread.join();
+
+		if (platform->ApplicationCleanUp() != rcode::ok) return rcode::err;
+		return rcode::ok;
+	}
+
+	void Application::Close() {
+		pShouldExist = false;
+	}
+
+	void Application::SetName(const std::string& name) {
+		pWindowName = name;
+	}
+
+	void Application::SetDrawingMode(pixel::DrawingMode mode) {
+		pDrawingMode = mode;
+	}
+
+	void Application::Draw(const vu2d& pos, const Pixel& pixel) {
+		if((pos.y * pScreenSize.x + pos.x) > pScreenSize.prod()) return;
+
+		if(pos.x >= pScreenSize.x) return;
+		if(pos.y >= pScreenSize.y) return;
+
+		if(pDrawingMode == DrawingMode::FULL_ALPHA) {
+			Pixel d = pBuffer[pos.y * pScreenSize.x + pos.x];
+
+			float a = (float) (pixel.v.a / 255.0f);
+			float c = 1.0f - a;
+
+			float r = a * (float) pixel.v.r + c * (float) d.v.r;
+			float g = a * (float) pixel.v.g + c * (float) d.v.g;
+			float b = a * (float) pixel.v.b + c * (float) d.v.b;
+
+			pBuffer[pos.y * pScreenSize.x + pos.x] = Pixel((uint8_t) r, (uint8_t) g, (uint8_t) b);
+
+		} else if(pDrawingMode == DrawingMode::NO_ALPHA) {
+			pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
+
+		} else if(pixel.v.a == 255) {
+			pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
+		}
+	}
+
+	void Application::DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+		int32_t x, y, dx, dy, dx1, dy1, px, py, xe, ye, i;
+		dx = pos2.x - pos1.x; dy = pos2.y - pos1.y;
+
+		if(dx == 0) {
+			if(pos2.y < pos1.y) for(y = pos2.y; y <= (int32_t) pos1.y; y++) Draw(vu2d(pos2.x, y), pixel);
+			else for(y = pos1.y; y <= (int32_t) pos2.y; y++) Draw(vu2d(pos1.x, y), pixel);
+
+			return;
+		}
+
+		if(dy == 0) {
+			if(pos2.x < pos1.x) for(x = pos2.x; x <= (int32_t) pos1.x; x++) Draw(vu2d(x, pos2.y), pixel);
+			for(x = pos1.x; x <= (int32_t) pos2.x; x++) Draw(vu2d(x, pos1.y), pixel);
+
+			return;
+		}
+
+		dx1 = std::abs(dx); dy1 = std::abs(dy);
+		px = 2 * dy1 - dx1;	py = 2 * dx1 - dy1;
+
+		if(dy1 <= dx1) {
+			if(dx >= 0) {
+				x = pos1.x; y = pos1.y; xe = pos2.x;
+			} else {
+				x = pos2.x; y = pos2.y; xe = pos1.x;
+			}
+
+			Draw(vu2d(x, y), pixel);
+
+			for(i = 0; x < xe; i++) {
+
+				x = x + 1;
+
+				if(px < 0)
+					px = px + 2 * dy1;
+				else {
+					if((dx < 0 && dy < 0) || (dx > 0 && dy > 0)) y = y + 1; else y = y - 1;
+					px = px + 2 * (dy1 - dx1);
+				}
+
+				Draw(vu2d(x, y), pixel);
+			}
+
+		} else {
+
+			if(dy >= 0) {
+				x = pos1.x; y = pos1.y; ye = pos2.y;
+			} else {
+				x = pos2.x; y = pos2.y; ye = pos1.y;
+			}
+
+			Draw(vu2d(x, y), pixel);
+
+			for(i = 0; y < ye; i++) {
+
+				y = y + 1;
+
+				if(py <= 0) {
+					py = py + 2 * dx1;
+				} else {
+					if((dx < 0 && dy < 0) || (dx > 0 && dy > 0)) x = x + 1; else x = x - 1;
+					py = py + 2 * (dx1 - dy1);
+				}
+
+				Draw(vu2d(x, y), pixel);
+			}
+		}
+	}
+
+	/*void Application::DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::FillCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::FillRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawSprite(const vf2d& pos, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawPartialWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}
+
+	void Application::DrawPartialRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& spos, const vf2d& ssize, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+		//! STUB: Implement function.
+	}*/
+
+	void Application::UpdateMouse(int32_t x, int32_t y) {
+		pHasMouseFocus = true;
+
+		x -= pViewPos.x;
+		y -= pViewPos.y;
+
+		pMousePos.x = (((float)x / (float)(pWindowSize.x - (pViewPos.x * 2)) * (float)pScreenSize.x));
+		pMousePos.y = (((float)y / (float)(pWindowSize.y - (pViewPos.y * 2)) * (float)pScreenSize.y));
+
+		if (pMousePos.x >= pScreenSize.x)	pMousePos.x = pScreenSize.x - 1;
+		if (pMousePos.y >= pScreenSize.y)	pMousePos.y = pScreenSize.y - 1;
+	}
+
+	void Application::UpdateMouseWheel(int32_t delta) {
+		pMouseWheel += delta;
+	}
+
+	void Application::UpdateWindowSize(int32_t x, int32_t y) {
+		pWindowSize = vu2d(x, y);
+		UpdateViewport();
+	}
+
+	void Application::UpdateViewport() {
+		int32_t ww = pScreenSize.x * pScale;
+		int32_t wh = pScreenSize.y * pScale;
+		float wasp = (float) ww / (float) wh;
+
+		pViewSize.x = (int32_t) pWindowSize.x;
+		pViewSize.y = (int32_t) ((float) pViewSize.x / wasp);
+
+		if(pViewSize.y > pWindowSize.y) {
+			pViewSize.y = pWindowSize.y;
+			pViewSize.x = (int32_t) ((float) pViewSize.y * wasp);
+		}
+
+		pViewPos = (pWindowSize - pViewSize) / 2;
+	}
+
+	void Application::ConstructFontSheet() {
+		//! STUB: Implement function.
+	}
+
+	void Application::UpdateMouseState(int32_t button, bool state) {
+		pMouseButtonsNew[button] = state;
+	}
+
+	void Application::UpdateKeyState(int32_t key, bool state) {
+		pKeyboardKeysNew[key] = state;
+	}
+
+	void Application::UpdateMouseFocus(bool state) {
+		pHasMouseFocus = state;
+	}
+
+	void Application::UpdateKeyFocus(bool state) {
+		pHasInputFocus = state;
+	}
+
+	bool Application::ShouldExist() const {
+		return pShouldExist;
+	}
+
+	pixel::DrawingMode Application::DrawingMode() const {
+		return pDrawingMode;
+	}
+
+	const vu2d& Application::DrawableSize() const {
+		return pScreenSize - 1;
+	}
+
+	const vu2d& Application::ScreenSize() const {
+		return pScreenSize;
+	}
+
+	const vu2d& Application::WindowSize() const {
+		return pWindowSize;
+	}
+
+	const vu2d& Application::WindowPos() const {
+		return pWindowPos;
+	}
+
+	const vu2d& Application::MousePos() const {
+		return pMousePos;
+	}
+
+	uint32_t Application::MouseWheel() const {
+		return pMouseWheel;
+	}
+
+	const Button& Application::MouseLeft() const {
+		return pMouseButtons[0];
+	}
+
+	const Button& Application::MouseRight() const {
+		return pMouseButtons[1];
+	}
+
+	const Button& Application::MouseMiddle() const {
+		return pMouseButtons[2];
+	}
+
+	const Button& Application::KeyboardKey(Key key) const {
+		return pKeyboardKeys[(uint8_t)key];
+	}
+
+	float Application::et() const {
+		return pElapsedTime;
+	}
+
+	uint32_t Application::FPS() const {
+		return pFrameRate;
+	}
+} 
+
+
 /*
 ____________________________
 
@@ -523,8 +1008,111 @@ ____________________________
 #include <png.h>
 
 namespace pixel {
-  class ImageLoader_LibPNG : public ImageLoader {
+	void pngReadStream(png_structp pngPtr, png_bytep data, png_size_t length) {
+		png_voidp a = png_get_io_ptr(pngPtr);
+		((std::istream*)a)->read((char*)data, length);
+	}
 
+  class ImageLoader_LibPNG : public ImageLoader {
+		virtual rcode LoadImage(Sprite* spr, const std::string& filename) {
+			if (std::filesystem::exists(filename)) return rcode::file_err;
+			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
+
+			png_structp png;
+			png_infop info;
+
+			auto loadPNG = [&]() {
+				png_read_info(png, info);
+				png_byte color_type;
+				png_byte bit_depth;
+				png_bytep* row_pointers;
+
+				spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
+				color_type = png_get_color_type(png, info);
+				bit_depth = png_get_bit_depth(png, info);
+
+				if (bit_depth == 16) png_set_strip_16(png);
+				if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+				if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
+				if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+
+				if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
+					png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+				}
+
+				if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+					png_set_gray_to_rgb(png);
+				}
+
+				png_read_update_info(png, info);
+				row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
+
+
+				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+					row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+				}
+
+				png_read_image(png, row_pointers);
+				spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
+
+				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+					png_bytep row = row_pointers[y];
+
+					for (uint32_t x = 0; x < spr->GetSize().x; x++) {
+						png_bytep px = &(row[x * 4]);
+						spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
+					}
+				}
+
+				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+					free(row_pointers[y]);
+				}
+
+				free(row_pointers);
+				png_destroy_read_struct(&png, &info, nullptr);
+			};
+
+			png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+			if (!png) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			info = png_create_info_struct(png);
+
+			if (!info) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			if (setjmp(png_jmpbuf(png))) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			FILE* f = fopen(filename.c_str(), "rb");
+			if (!f) return rcode::file_err;
+
+			png_init_io(png, f);
+			loadPNG();
+			fclose(f);
+
+			return rcode::ok;
+		}
+
+		virtual rcode SaveImage(Sprite* spr, const std::string& filename) {
+			IGNORE(spr);
+			IGNORE(filename);
+
+			return rcode::ok;
+		}
   };
 }
 #endif /* PIXEL_USE_LIBPNG */
@@ -573,12 +1161,11 @@ namespace pixel {
 		X11::Window* pWindow = nullptr;
 		X11::XVisualInfo* pVisualInfo = nullptr;
 
-		virtual void PrepareDevice() override {
-			//! STUB: To be implemented!
-		}
+		virtual void PrepareDevice() override {}
 
 		virtual rcode CreateDevice(std::vector<void*> params, bool fullscreen, bool vsync) override {
 			using namespace X11;
+			IGNORE(fullscreen);
 
 			pDisplay = (X11::Display*)(params[0]);
 			pWindow = (X11::Window*)(params[1]);
@@ -636,20 +1223,19 @@ namespace pixel {
 			glEnd();
 		}
 		
-		virtual void DrawDecalQuad(const Sprite& decal) override {
-			glBindTexture(GL_TEXTURE_2D, decal.pBufferId);
+		virtual void DrawDecalQuad(const Sprite& sprite) override {
 			glBegin(GL_QUADS);
 	
-			glColor4ub(decal.pTint.v.r, decal.pTint.v.g, decal.pTint.v.b, decal.pTint.v.a);
+			glColor4ub(sprite.pTint.v.r, sprite.pTint.v.g, sprite.pTint.v.b, sprite.pTint.v.a);
 
-			glTexCoord4f(decal.pUv[0].x, decal.pUv[0].y, 0.0f, decal.pW[0]); 
-			glVertex2f(decal.pPos[0].x, decal.pPos[0].y);
-			glTexCoord4f(decal.pUv[1].x, decal.pUv[1].y, 0.0f, decal.pW[1]); 
-			glVertex2f(decal.pPos[1].x, decal.pPos[1].y);
-			glTexCoord4f(decal.pUv[2].x, decal.pUv[2].y, 0.0f, decal.pW[2]); 
-			glVertex2f(decal.pPos[2].x, decal.pPos[2].y);
-			glTexCoord4f(decal.pUv[3].x, decal.pUv[3].y, 0.0f, decal.pW[3]); 
-			glVertex2f(decal.pPos[3].x, decal.pPos[3].y);
+			glTexCoord4f(sprite.pUv[0].x, sprite.pUv[0].y, 0.0f, sprite.pW[0]); 
+			glVertex2f(sprite.pPos[0].x, sprite.pPos[0].y);
+			glTexCoord4f(sprite.pUv[1].x, sprite.pUv[1].y, 0.0f, sprite.pW[1]); 
+			glVertex2f(sprite.pPos[1].x, sprite.pPos[1].y);
+			glTexCoord4f(sprite.pUv[2].x, sprite.pUv[2].y, 0.0f, sprite.pW[2]); 
+			glVertex2f(sprite.pPos[2].x, sprite.pPos[2].y);
+			glTexCoord4f(sprite.pUv[3].x, sprite.pUv[3].y, 0.0f, sprite.pW[3]); 
+			glVertex2f(sprite.pPos[3].x, sprite.pPos[3].y);
 			
 			glEnd();
 		}
@@ -683,16 +1269,21 @@ namespace pixel {
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, spr->pSize.x, spr->pSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, spr->pBuffer);
 		}
 
+		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) override {
+			IGNORE(id);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+		}
+
 		virtual void ApplyTexture(uint32_t id) override {
 			glBindTexture(GL_TEXTURE_2D, id);
 		}
 
-		virtual void UpdateViewport(const vi2d& pos, const vi2d& size) override {
+		virtual void UpdateViewport(const vu2d& pos, const vu2d& size) override {
 			glViewport(pos.x, pos.y, size.x, size.y);
 		}
 
 		virtual void ClearBuffer(Pixel p, bool depth) override {
-			glClearColor(float(p.r) / 255.0f, float(p.g) / 255.0f, float(p.b) / 255.0f, float(p.a) / 255.0f);
+			glClearColor(float(p.v.r) / 255.0f, float(p.v.g) / 255.0f, float(p.v.b) / 255.0f, float(p.v.a) / 255.0f);
 			glClear(GL_COLOR_BUFFER_BIT);
 			if (depth) glClear(GL_DEPTH_BUFFER_BIT);
 		}
@@ -737,16 +1328,17 @@ namespace pixel {
       return rcode::ok;
     }
 
-		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vi2d& viewpos, const vi2d& viewsize) override {
+		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
       if(renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
         renderer->UpdateViewport(viewpos, viewsize);
+				return rcode::ok;
 
       } else {
         return rcode::err;
       }
     }
 
-		virtual rcode CreateWindowPane(const vi2d& winpos, vi2d& winsize, bool fullscreen) override {
+		virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) override {
       using namespace X11;  
       XInitThreads();
 
@@ -775,18 +1367,18 @@ namespace pixel {
 				wm_state = XInternAtom(pDisplay, "_NET_WM_STATE", False);
 				fs = XInternAtom(pDisplay, "_NET_WM_STATE_FULLSCREEN", False);
 
-				XEvent xev{ 0 };
-				xev.type = ClientMessage;
-				xev.xclient.window = pWindow;
-				xev.xclient.message_type = wm_state;
-				xev.xclient.format = 32;
-				xev.xclient.data.l[0] = (fullscreen ? 1 : 0);
-				xev.xclient.data.l[1] = fs;
-				xev.xclient.data.l[2] = 0;
-				xev.xclient.data.l[3] = 0;                    
+				XEvent event {0};
+				event.type = ClientMessage;
+				event.xclient.window = pWindow;
+				event.xclient.message_type = wm_state;
+				event.xclient.format = 32;
+				event.xclient.data.l[0] = (fullscreen ? 1 : 0);
+				event.xclient.data.l[1] = fs;
+				event.xclient.data.l[2] = 0;
+				event.xclient.data.l[3] = 0;                    
 
 				XMapWindow(pDisplay, pWindow);
-				XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+				XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
 				XFlush(pDisplay);
 
 				XWindowAttributes gwa;
@@ -870,7 +1462,65 @@ namespace pixel {
 			while (XPending(pDisplay)) {
 				XNextEvent(pDisplay, &event);
 
-				 //! STUB: Implement event handling!
+				if (event.type == ClientMessage) {
+					App->Close();
+
+				} else if (event.type == FocusOut) {
+					App->UpdateKeyFocus(false);
+					
+				} else if (event.type == FocusIn) {
+					App->UpdateKeyFocus(true);
+
+				} else if (event.type == MotionNotify) {
+					App->UpdateMouse(event.xmotion.x, event.xmotion.y);
+
+				} else if (event.type == ButtonPress) {
+					switch (event.xbutton.button) {
+					case 4:	App->UpdateMouseWheel(100); break;
+					case 5:	App->UpdateMouseWheel(-100); break;
+
+					case 1:	App->UpdateMouseState(0, true); break;
+					case 2:	App->UpdateMouseState(2, true); break;
+					case 3:	App->UpdateMouseState(1, true); break;
+
+					default: break;
+					}
+
+				} else if (event.type == ButtonRelease) {
+					switch (event.xbutton.button) {
+					case 1:	App->UpdateMouseState(0, false); break;
+					case 2:	App->UpdateMouseState(2, false); break;
+					case 3:	App->UpdateMouseState(1, false); break;
+
+					default: break;
+					}
+
+				} else if (event.type == KeyPress) {
+					KeySym s = XLookupKeysym(&event.xkey, 0);
+					App->UpdateKeyState(pKeyMap[s], true);
+
+					XKeyEvent* e = (XKeyEvent*)&event;
+					XLookupString(e, NULL, 0, &s, NULL);
+					App->UpdateKeyState(pKeyMap[s], true);
+
+				} else if (event.type == KeyRelease) {
+					KeySym s = XLookupKeysym(&event.xkey, 0);
+					App->UpdateKeyState(pKeyMap[s], false);
+
+					XKeyEvent* e = (XKeyEvent*)&event;
+					XLookupString(e, NULL, 0, &s, NULL);
+					App->UpdateKeyState(pKeyMap[s], false);
+
+				} else if (event.type == Expose) {
+					XWindowAttributes gwa;
+
+					XGetWindowAttributes(pDisplay, pWindow, &gwa);
+					App->UpdateWindowSize(gwa.width, gwa.height);
+
+				} else if (event.type == ConfigureNotify) {
+					XConfigureEvent xce = event.xconfigure;
+					App->UpdateWindowSize(xce.width, xce.height);
+				}
 			}
 			
 			return rcode::ok; 

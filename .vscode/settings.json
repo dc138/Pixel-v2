@@ -68,6 +68,7 @@
         "valarray": "cpp",
         "variant": "cpp",
         "version": "cpp",
-        "*.rh": "cpp"
+        "*.rh": "cpp",
+        "filesystem": "cpp"
     }
 }
