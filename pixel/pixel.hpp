@@ -42,60 +42,60 @@
     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
+  	SOFTWARE.
 
 
-		SAMPLE PROGRAM:
-		~~~~~~~~~~~~~~~~~
+    SAMPLE PROGRAM:
+    ~~~~~~~~~~~~~~~
 
-		The folowing program will create a wimple application window and draw 50 random
-		lines (color and position) every frame.
+    The folowing program will create a wimple application window and draw 50 random
+    lines (color and position) every frame.
 
-		#include <iostream>
+    #include <iostream>
 
-		#include <pixel/pixel.hpp>
-		using namespace pixel;
+    #include <pixel/pixel.hpp>
+    using namespace pixel;
 
-		int main() {
-		  Application app({.size = vu2d(500, 500), .name = "Lines",
-		  .on_update = [] (Application& app) mutable -> pixel::rcode {
-		    for (uint8_t i = 0; i < 50; i++) {
-		      app.DrawLine(
-		        vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
-						vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
-						RandPixel()
-		      );
-		    }
+    int main() {
+      Application app({.size = vu2d(500, 500), .name = "Lines",
+      .on_update = [] (Application& app) mutable -> pixel::rcode {
+        for (uint8_t i = 0; i < 50; i++) {
+          app.DrawLine(
+            vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
+    				vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
+    				RandPixel()
+          );
+        }
 
-		    if(app.KeyboardKey(Key::ESCAPE).pressed) {
-					app.Close();
-				}
+        if(app.KeyboardKey(Key::ESCAPE).pressed) {
+        	app.Close();
+        }
 
-		    return pixel::ok;
-		  }});
+        return pixel::ok;
+      }});
 
-		  app.Launch();
+      app.Launch();
 
-		  return 0;
-		}
+      return 0;
+    }
 
-		COMPILING:
-		~~~~~~~~~
+    COMPILING:
+    ~~~~~~~~~
 
-		Only linux systems are supported at this moment, but support for MacOS and windows
-		will come in the future. To compile under linux you will need a modern C++ compiler,
-		as this library makes use of C++20 features, so update your compiler if you haven't
-		already. This library has only been tested with GCC, so CLANG builds might not work
-		correctly. To compile simply run:
+    Only linux systems are supported at this moment, but support for MacOS and windows
+    will come in the future. To compile under linux you will need a modern C++ compiler,
+    as this library makes use of C++20 features, so update your compiler if you haven't
+    already. This library has only been tested with GCC, so CLANG builds might not work
+    correctly. To compile simply run:
 
-			g++ -o YourProgramName YourProgramName.cpp -lX11 -lGL -lpthread -lpng -std=c++20 -O2 \
-		      -I. -Wall -pedantic-errors && ./YourProgramName
+   	g++ -o YourProgramName YourProgramName.cpp -lX11 -lGL -lpthread -lpng -std=c++20 -O2 \
+         -I. -Wall -pedantic-errors && ./YourProgramName
 
 
-		AUTHOR
-		~~~~~~
+    AUTHOR
+    ~~~~~~
 
-		Antonio de Haro
+    Antonio de Haro
 
 */
 
