@@ -271,7 +271,7 @@ namespace pixel {
 
 		friend class Application;
 		friend class Renderer_OpenGL;
-		friend class ImageLoader_LibPNG;
+		friend class ImageLoader;
 
   public:
     Sprite(const Sprite& src);
@@ -353,13 +353,13 @@ namespace pixel {
 		Application* App;
 	};
 
-  class ImageLoader {
+  class ImageLoader final {
   public:
     ImageLoader() = default;
 		virtual ~ImageLoader() = default;
 
-		virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
-		virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
+		virtual rcode LoadImage(Sprite* spr, const std::string& filename);
+		virtual rcode SaveImage(Sprite* spr, const std::string& filename);
   };
 
 	static std::unique_ptr<Renderer> renderer;
@@ -1351,8 +1351,7 @@ namespace pixel {
 		((std::istream*)a)->read((char*)data, length);
 	}
 
-  class ImageLoader_LibPNG : public ImageLoader {
-		virtual rcode LoadImage(Sprite* spr, const std::string& filename) {
+  rcode ImageLoader::LoadImage(Sprite* spr, const std::string& filename) {
 			//if (std::filesystem::exists(filename)) return rcode::file_err;
 			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
 
@@ -1443,13 +1442,12 @@ namespace pixel {
 			return rcode::ok;
 		}
 
-		virtual rcode SaveImage(Sprite* spr, const std::string& filename) {
+		rcode ImageLoader::SaveImage(Sprite* spr, const std::string& filename) {
 			IGNORE(spr);
 			IGNORE(filename);
 
 			return rcode::ok;
 		}
-  };
 }
 #endif /* PIXEL_USE_LIBPNG */
 
@@ -1477,9 +1475,6 @@ ____________________________
   
   	typedef int(glSwapInterval_t)(X11::Display* dpy, X11::GLXDrawable drawable, int interval);
   	static glSwapInterval_t* glSwapIntervalEXT;
-
-  	typedef X11::GLXContext glDeviceContext_t;
-  	typedef X11::GLXContext glRenderContext_t;
   #elif defined(PIXEL_WIN)
   #elif defined(PIXEL_MACOS)
   #endif
@@ -1488,14 +1483,10 @@ ____________________________
 namespace pixel {
   class Renderer_OpenGL : public Renderer {
 	private:
-		glDeviceContext_t glDeviceContext = 0;
-		glRenderContext_t glRenderContext = 0;
-
-		bool vsync = false;
-
 		X11::Display* pDisplay = nullptr;
 		X11::Window* pWindow = nullptr;
 		X11::XVisualInfo* pVisualInfo = nullptr;
+		X11::GLXContext pContext = nullptr;
 
 		virtual void PrepareDevice() override {}
 
@@ -1507,8 +1498,8 @@ namespace pixel {
 			pWindow = (X11::Window*)(params[1]);
 			pVisualInfo = (X11::XVisualInfo*)(params[2]);
 
-			glDeviceContext = glXCreateContext(pDisplay, pVisualInfo, nullptr, GL_TRUE);
-			glXMakeCurrent(pDisplay, *pWindow, glDeviceContext);
+			pContext = glXCreateContext(pDisplay, pVisualInfo, nullptr, GL_TRUE);
+			glXMakeCurrent(pDisplay, *pWindow, pContext);
 
 			XWindowAttributes gwa;
 			XGetWindowAttributes(pDisplay, *pWindow, &gwa);
@@ -1529,7 +1520,7 @@ namespace pixel {
 
 		virtual rcode DestroyDevice() override {
 			glXMakeCurrent(pDisplay, None, NULL);
-			glXDestroyContext(pDisplay, glDeviceContext);
+			glXDestroyContext(pDisplay, pContext);
 
 			return rcode::ok;
 		}
@@ -1884,13 +1875,7 @@ ____________________________
 namespace pixel {
   void Application::pConfigureSystem() {
 
-#ifdef PIXEL_USE_GDI
-    loader = std::make_unique<ImageLoader_GDI>();
-#endif
-
-#ifdef PIXEL_USE_LIBPNG
-    loader = std::make_unique<ImageLoader_LibPNG>();
-#endif
+  	loader = std::make_unique<ImageLoader>();
 
 
 #ifdef PIXEL_USE_DIRECTX
