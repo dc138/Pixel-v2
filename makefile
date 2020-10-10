@@ -21,7 +21,7 @@ $(BUILD)/$(TARGET): $(SRC) $(HEADER)
 debug: CXXFLAGS += -DDEBUG -g
 debug: all
 
-release: CXXFLAGS += -O2
+release: CXXFLAGS += -Ofast -flto
 release: all
 
 clean:

@@ -15,8 +15,8 @@
     It is intended to help newer programmers more easily make their first graphical 
     application to learn the basics of 2d graphics, and later 3d graphics.
     
-    Only windows build are supported at the moment, as this library makes use of
-    the Win32 API. Linux support may come in the future.
+    Only linux build are supported at the moment, as this library makes use of
+    X11. Windows and MacOS are coming in the future.
     
 
     LICENSE:
@@ -91,6 +91,12 @@
 			g++ -o YourProgramName YourProgramName.cpp -lX11 -lGL -lpthread -lpng -std=c++20 -O2 \
 		      -I. -Wall -pedantic-errors && ./YourProgramName
 
+
+		AUTHOR
+		~~~~~~
+
+		Antonio de Haro
+
 */
 
 #pragma once
@@ -129,7 +135,7 @@
 #include <vector>
 #include <thread>
 #include <filesystem>
-
+#include <stdlib.h>
 
 /*
 ___________________________
@@ -140,7 +146,6 @@ ___________________________
 */
 
 namespace pixel {
-
   enum rcode { ok = 0, err = 1, file_err = 2, abort = 3 };
   class Application;
   class Sprite;
@@ -269,7 +274,11 @@ namespace pixel {
 		friend class ImageLoader_LibPNG;
 
   public:
-    Sprite(const Sprite& other) = delete;
+    Sprite(const Sprite& src);
+		Sprite& operator=(const Sprite& rhs);
+
+    Sprite(Sprite&& src) noexcept;
+		Sprite& operator=(Sprite&& rhs) noexcept;
 
 	public:
 		Pixel GetPixel(uint32_t x, uint32_t y) const;
@@ -281,7 +290,10 @@ namespace pixel {
 	public:
     rcode LoadFromFile(const std::string& filename);
     rcode SaveToFile(const std::string& filename);
+
+	public:
 		void Update();
+		void Swap(Sprite& other) noexcept;
 
 	private:
 		vu2d pSize;
@@ -378,6 +390,8 @@ namespace pixel {
 		Application(params_t params);
 		~Application();
 
+		friend class Platform_Linux;
+
 	public:
 		rcode Launch();
 
@@ -396,6 +410,12 @@ namespace pixel {
 		void SetName(const std::string& name);
 		void SetDrawingMode(pixel::DrawingMode mode);
 
+	public:
+		void CreateSprite(const std::string& filename);
+		void CreateSprite(uint32_t w, uint32_t h);
+
+		Sprite& GetSprite(uint32_t id);
+
   public:
 		void Draw(const vu2d& pos, const Pixel& pixel);
 		void DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel);
@@ -409,25 +429,25 @@ namespace pixel {
 		void DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
 		void FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
 
-		void DrawSprite(const vf2d& pos, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
-		void DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+		void DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+		void DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
 
-		void DrawWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White);
-		void DrawPartialWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White);
+		void DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White);
+		void DrawPartialWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White);
 
-		void DrawRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
-		void DrawPartialRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& spos, const vf2d& ssize, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+		void DrawRotatedSprite(const vf2d& pos, uint8_t sprite, float alpha, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+		void DrawPartialRotatedSprite(const vf2d& pos, uint8_t sprite, float alpha, const vf2d& spos, const vf2d& ssize, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
 
-  public:
-		void UpdateMouse(int32_t x, int32_t y);
-		void UpdateMouseWheel(int32_t delta);
-		void UpdateWindowSize(int32_t x, int32_t y);
+  private:
+		void UpdateMouse(uint32_t x, uint32_t y);
+		void UpdateMouseWheel(uint32_t delta);
+		void UpdateWindowSize(uint32_t x, uint32_t y);
 
 		void UpdateViewport();
 		void ConstructFontSheet();
 
-		void UpdateMouseState(int32_t button, bool state);
-		void UpdateKeyState(int32_t key, bool state);
+		void UpdateMouseState(uint32_t button, bool state);
+		void UpdateKeyState(uint32_t key, bool state);
 
 		void UpdateMouseFocus(bool state);
 		void UpdateKeyFocus(bool state);
@@ -452,7 +472,7 @@ namespace pixel {
 		const Button& KeyboardKey(Key key) const;
 
 		float et() const;
-		uint32_t FPS() const;
+		uint32_t fps() const;
 
   private:
 		vu2d pWindowSize;
@@ -512,7 +532,8 @@ namespace pixel {
 		Pixel* pBuffer = nullptr;
 		uint32_t pBufferId = 0xFFFFFFFF;
 
-		std::vector<Sprite*> pSprites;
+		std::vector<Sprite> pSprites;
+		std::vector<Sprite*> pSpritesPending;
 		pixel::DrawingMode pDrawingMode = pixel::DrawingMode::NO_ALPHA;
   };
 }
@@ -557,8 +578,42 @@ namespace pixel {
   }
 
   Sprite::Sprite(const std::string& filename) {
-    LoadFromFile(filename);
+    if (LoadFromFile(filename) != rcode::ok) throw std::exception();
   }
+
+  Sprite::Sprite(const Sprite& src) :
+		pSize(src.pSize),
+		pUvScale(src.pUvScale),
+		pBufferId(src.pBufferId),
+		pPos(src.pPos),
+		pUv(src.pUv),
+		pW{src.pW[0], src.pW[1], src.pW[2], src.pW[3]},
+		pTint(src.pTint) {
+
+		pBuffer = new Pixel[src.pSize.prod()];
+
+    for(uint32_t i = 0; i < src.pSize.prod(); i++) {
+      pBuffer[i] = src.pBuffer[i];
+    }
+
+		Update();
+	}
+	
+	Sprite& Sprite::operator=(const Sprite& rhs) {
+		Sprite copy(rhs);
+		Swap(copy);
+		return *this;
+	}
+
+  Sprite::Sprite(Sprite&& src) noexcept {
+		pBuffer = nullptr;
+		Swap(src);
+	}
+
+	Sprite& Sprite::operator=(Sprite&& rhs) noexcept {
+		Swap(rhs);
+		return *this;
+	}
 
 	Pixel Sprite::GetPixel(uint32_t x, uint32_t y) const {
 		if (x < pSize.x && y < pSize.y) {
@@ -584,7 +639,9 @@ namespace pixel {
 	}
 
   rcode Sprite::LoadFromFile(const std::string& filename) {
-    return loader->LoadImage(this, filename);
+    rcode code = loader->LoadImage(this, filename);
+		if (code == rcode::ok) Update();
+		return code;
   }
 
   rcode Sprite::SaveToFile(const std::string& filename) {
@@ -598,6 +655,19 @@ namespace pixel {
     renderer->ApplyTexture(pBufferId);
     renderer->UpdateTexture(pBufferId, this);
   }
+
+	void Sprite::Swap(Sprite& other) noexcept {
+		std::swap(pSize, other.pSize);
+		std::swap(pUvScale, other.pUvScale);
+
+		std::swap(pBuffer, other.pBuffer);
+		std::swap(pBufferId, other.pBufferId);
+
+		std::swap(pPos, other.pPos);
+		std::swap(pUv, other.pUv);
+		std::swap(pW, other.pW);
+		std::swap(pTint, other.pTint);
+	}
 }
 
 namespace pixel {
@@ -644,7 +714,7 @@ namespace pixel {
 		pClock2 = std::chrono::system_clock::now();
 
 		if (pOnLaunch) {
-			if (pOnLaunch(*this) == rcode::err) pShouldExist = false;
+			if (pOnLaunch(*this) != rcode::ok) pShouldExist = false;
 		}
 
 		while (pShouldExist) {
@@ -653,10 +723,12 @@ namespace pixel {
 			}
 			
 			if (pOnClose) {
-				if (pOnClose(*this) == rcode::abort) pShouldExist = true;
+				if (pOnClose(*this) != rcode::ok) pShouldExist = true;
 			}
 		}
 		
+		delete[] pBuffer;
+		renderer->DeleteTexture(pBufferId);
 		platform->ThreadCleanUp();
 	}
 
@@ -682,19 +754,15 @@ namespace pixel {
 		}
 
 		for(uint32_t i = 0; i < 3; i++) {
-
 			pMouseButtons[i].pressed = false;
 			pMouseButtons[i].released = false;
 
 			if(pMouseButtonsNew[i] != pMouseButtonsOld[i]) {
-
 				if(pMouseButtonsNew[i]) {
-
 					pMouseButtons[i].pressed = !pMouseButtons[i].held;
 					pMouseButtons[i].held = true;
 
 				} else {
-
 					pMouseButtons[i].released = true;
 					pMouseButtons[i].held = false;
 				}
@@ -704,19 +772,16 @@ namespace pixel {
 		}
 
 		for(uint32_t i = 0; i < 256; i++) {
-
 			pKeyboardKeys[i].pressed = false;
 			pKeyboardKeys[i].released = false;
 
 			if(pKeyboardKeysNew[i] != pKeyboardKeysOld[i]) {
-
 				if(pKeyboardKeysNew[i]) {
 
 					pKeyboardKeys[i].pressed = !pKeyboardKeys[i].held;
 					pKeyboardKeys[i].held = true;
 
 				} else {
-
 					pKeyboardKeys[i].released = true;
 					pKeyboardKeys[i].held = false;
 				}
@@ -726,7 +791,7 @@ namespace pixel {
 		}
 
 		if (pOnUpdate) {
-			if (pOnUpdate(*this) == rcode::abort) pShouldExist = false;
+			if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
 		}
 
 		renderer->UpdateViewport(pViewPos, pViewSize);
@@ -737,11 +802,12 @@ namespace pixel {
 		renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
 		renderer->DrawLayerQuad();
 
-		for (auto& s : pSprites) {
+		for (auto& s : pSpritesPending) {
 			renderer->ApplyTexture(s->pBufferId);
 			renderer->DrawDecalQuad(*s);
 		}
 
+		pSpritesPending.clear();
 		renderer->DisplayFrame();
 	}
 
@@ -774,13 +840,25 @@ namespace pixel {
 		pDrawingMode = mode;
 	}
 
+	void Application::CreateSprite(const std::string& filename) {
+		pSprites.push_back(Sprite(filename));
+	}
+	
+	void Application::CreateSprite(uint32_t w, uint32_t h) {
+		pSprites.push_back(Sprite(w, h));
+	}
+
+	Sprite& Application::GetSprite(uint32_t id) {
+		return pSprites.at(id);
+	}
+
 	void Application::Draw(const vu2d& pos, const Pixel& pixel) {
-		if((pos.y * pScreenSize.x + pos.x) > pScreenSize.prod()) return;
+		if ((pos.y * pScreenSize.x + pos.x) > pScreenSize.prod()) return;
 
-		if(pos.x >= pScreenSize.x) return;
-		if(pos.y >= pScreenSize.y) return;
+		if (pos.x >= pScreenSize.x) return;
+		if (pos.y >= pScreenSize.y) return;
 
-		if(pDrawingMode == DrawingMode::FULL_ALPHA) {
+		if (pDrawingMode == DrawingMode::FULL_ALPHA) {
 			Pixel d = pBuffer[pos.y * pScreenSize.x + pos.x];
 
 			float a = (float) (pixel.v.a / 255.0f);
@@ -792,10 +870,10 @@ namespace pixel {
 
 			pBuffer[pos.y * pScreenSize.x + pos.x] = Pixel((uint8_t) r, (uint8_t) g, (uint8_t) b);
 
-		} else if(pDrawingMode == DrawingMode::NO_ALPHA) {
+		} else if (pDrawingMode == DrawingMode::NO_ALPHA) {
 			pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
 
-		} else if(pixel.v.a == 255) {
+		} else if (pixel.v.a == 255) {
 			pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
 		}
 	}
@@ -870,35 +948,253 @@ namespace pixel {
 		}
 	}
 
-	/*void Application::DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
-		//! STUB: Implement function.
+	void Application::DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
+		uint32_t x0 = 0;
+		uint32_t y0 = radius;
+		int d = 3 - 2 * radius;
+
+		if(!radius) return;
+
+		while(y0 >= x0) {
+			Draw(vu2d(pos.x + x0, pos.y - y0), pixel);
+			Draw(vu2d(pos.x + y0, pos.y - x0), pixel);
+			Draw(vu2d(pos.x + y0, pos.y + x0), pixel);
+			Draw(vu2d(pos.x + x0, pos.y + y0), pixel);
+			Draw(vu2d(pos.x - x0, pos.y + y0), pixel);
+			Draw(vu2d(pos.x - y0, pos.y + x0), pixel);
+			Draw(vu2d(pos.x - y0, pos.y - x0), pixel);
+			Draw(vu2d(pos.x - x0, pos.y - y0), pixel);
+
+			if(d < 0) d += 4 * x0++ + 6;
+			else d += 4 * (x0++ - y0--) + 10;
+		}
 	}
 
 	void Application::FillCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
-		//! STUB: Implement function.
+		int x0 = 0;
+		int y0 = radius;
+		int d = 3 - 2 * radius;
+
+		if(!radius) return;
+
+		auto scanline = [&] (int sx, int ex, int ny) {
+			for(int i = sx; i <= ex; i++)
+				Draw(vu2d(i, ny), pixel);
+		};
+
+		while(y0 >= x0) {
+			scanline(pos.x - x0, pos.x + x0, pos.y - y0);
+			scanline(pos.x - y0, pos.x + y0, pos.y - x0);
+			scanline(pos.x - x0, pos.x + x0, pos.y + y0);
+			scanline(pos.x - y0, pos.x + y0, pos.y + x0);
+
+			if(d < 0) d += 4 * x0++ + 6;
+			else d += 4 * (x0++ - y0--) + 10;
+		}
 	}
 
 	void Application::DrawRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
-		//! STUB: Implement function.
+		DrawLine(vu2d(pos1.x, pos1.y), vu2d(pos1.y, pos2.x), pixel);
+		DrawLine(vu2d(pos1.y, pos2.x), vu2d(pos2.x, pos2.y), pixel);
+		DrawLine(vu2d(pos2.x, pos2.y), vu2d(pos2.y, pos1.x), pixel);
+		DrawLine(vu2d(pos2.y, pos1.x), vu2d(pos1.x, pos1.y), pixel);
 	}
 
 	void Application::FillRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
-		//! STUB: Implement function.
+		for(uint32_t x = std::min(pos1.x, pos2.x); x <= std::max(pos1.x, pos2.x); x++) {
+			for(uint32_t y = std::min(pos1.y, pos2.y); y <= std::max(pos1.y, pos2.y); y++) {
+				Draw(vu2d(x, y), pixel);
+			}
+		}
 	}
 
 	void Application::DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
-		//! STUB: Implement function.
+		DrawLine(vu2d(pos1.x, pos1.y), vu2d(pos2.x, pos2.y), pixel);
+		DrawLine(vu2d(pos2.x, pos2.y), vu2d(pos3.x, pos3.y), pixel);
+		DrawLine(vu2d(pos3.x, pos3.y), vu2d(pos1.x, pos1.y), pixel);
 	}
 
 	void Application::FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
-		//! STUB: Implement function.
+		auto drawline = [&] (int sx, int ex, int ny) {
+			for(int i = sx; i <= ex; i++)
+				Draw(vu2d(i, ny), pixel);
+		};
+
+		int32_t t1x, t2x, y, minx, maxx, t1xp, t2xp;
+		int32_t signx1, signx2, dx1, dy1, dx2, dy2;
+		int32_t e1, e2;
+
+		bool changed1 = false;
+		bool changed2 = false;
+
+		/*
+		if(pos1.y > pos2.y) { std::swap(pos1.y, pos2.y); std::swap(pos1.x, pos2.x); }
+		if(pos1.y > pos3.y) { std::swap(pos1.y, pos3.y); std::swap(pos1.x, pos3.x); }
+		if(pos2.y > pos3.y) { std::swap(pos2.y, pos3.y); std::swap(pos2.x, pos3.x); }
+		*/
+
+		t1x = t2x = pos1.x; y = pos1.y;
+		dx1 = (int) (pos2.x - pos1.x);
+		if(dx1 < 0) { dx1 = -dx1; signx1 = -1; } else signx1 = 1;
+		dy1 = (int) (pos2.y - pos1.y);
+
+		dx2 = (int) (pos3.x - pos1.x);
+		if(dx2 < 0) { dx2 = -dx2; signx2 = -1; } else signx2 = 1;
+		dy2 = (int) (pos3.y - pos1.y);
+
+		if(dy1 > dx1) { std::swap(dx1, dy1); changed1 = true; }
+		if(dy2 > dx2) { std::swap(dy2, dx2); changed2 = true; }
+
+		e2 = (int) (dx2 >> 1);
+
+		if(pos1.y == pos2.y) goto next;
+		e1 = (int) (dx1 >> 1);
+
+		for(int i = 0; i < dx1;) {
+			t1xp = 0; t2xp = 0;
+			if(t1x < t2x) { minx = t1x; maxx = t2x; } else { minx = t2x; maxx = t1x; }
+
+			while(i < dx1) {
+				i++;
+				e1 += dy1;
+
+				while(e1 >= dx1) {
+					e1 -= dx1;
+
+					if(changed1) t1xp = signx1;
+					else          goto next1;
+				}
+
+				if(changed1) break;
+				else t1x += signx1;
+			}
+
+			next1:
+
+			while(1) {
+				e2 += dy2;
+
+				while(e2 >= dx2) {
+					e2 -= dx2;
+
+					if(changed2) t2xp = signx2;
+					else          goto next2;
+				}
+
+				if(changed2)     break;
+				else              t2x += signx2;
+			}
+
+			next2:
+
+			if(minx > t1x) minx = t1x;
+			if(minx > t2x) minx = t2x;
+			if(maxx < t1x) maxx = t1x;
+			if(maxx < t2x) maxx = t2x;
+
+			drawline(minx, maxx, y);
+
+			if(!changed1) t1x += signx1;
+			t1x += t1xp;
+
+			if(!changed2) t2x += signx2;
+			t2x += t2xp;
+
+			y += 1;
+			if(y == (int32_t)pos2.y) break;
+		}
+
+		next:
+
+		dx1 = (int) (pos3.x - pos2.x); if(dx1 < 0) { dx1 = -dx1; signx1 = -1; } else signx1 = 1;
+		dy1 = (int) (pos3.y - pos2.y);
+
+		t1x = pos2.x;
+
+		if(dy1 > dx1) {
+			std::swap(dy1, dx1);
+			changed1 = true;
+		} else changed1 = false;
+
+		e1 = (int) (dx1 >> 1);
+
+		for(int i = 0; i <= dx1; i++) {
+			t1xp = 0; t2xp = 0;
+
+			if(t1x < t2x) { minx = t1x; maxx = t2x; } else { minx = t2x; maxx = t1x; }
+
+			while(i < dx1) {
+				e1 += dy1;
+
+				while(e1 >= dx1) {
+					e1 -= dx1;
+					if(changed1) { t1xp = signx1; break; } else goto next3;
+				}
+
+				if(changed1) break;
+				else   	   	  t1x += signx1;
+				if(i < dx1) i++;
+			}
+
+			next3:
+
+			while(t2x != (int32_t)pos3.x) {
+				e2 += dy2;
+
+				while(e2 >= dx2) {
+					e2 -= dx2;
+					if(changed2) t2xp = signx2;
+					else          goto next4;
+				}
+
+				if(changed2)     break;
+				else              t2x += signx2;
+			}
+
+			next4:
+
+			if(minx > t1x) minx = t1x;
+			if(minx > t2x) minx = t2x;
+			if(maxx < t1x) maxx = t1x;
+			if(maxx < t2x) maxx = t2x;
+
+			drawline(minx, maxx, y);
+
+			if(!changed1) t1x += signx1;
+			t1x += t1xp;
+
+			if(!changed2) t2x += signx2;
+			t2x += t2xp;
+
+			y += 1;
+			if(y > (int32_t)pos3.y) return;
+		}
 	}
 
-	void Application::DrawSprite(const vf2d& pos, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
-		//! STUB: Implement function.
+	void Application::DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
+		Sprite& spr = pSprites.at(sprite);
+		
+		vf2d newpos = {
+			(pos.x * pInvScreenSize.x) * 2.0f - 1.0f,
+			((pos.y * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
+		};
+
+		vf2d newsize = {
+			newpos.x + (2.0f * (float(spr.pSize.x) * pInvScreenSize.x)) * scale.x,
+			newpos.y - (2.0f * (float(spr.pSize.y) * pInvScreenSize.y)) * scale.y
+		};
+
+		spr.pTint = tint;
+
+		spr.pPos[0] = { newpos.x, newpos.y };
+		spr.pPos[1] = { newpos.x, newsize.y };
+		spr.pPos[2] = { newsize.x, newsize.y };
+		spr.pPos[3] = { newsize.x, newpos.y };
+		
+		pSpritesPending.push_back(&spr);
 	}
 
-	void Application::DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+	/*void Application::DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
 		//! STUB: Implement function.
 	}
 
@@ -918,7 +1214,7 @@ namespace pixel {
 		//! STUB: Implement function.
 	}*/
 
-	void Application::UpdateMouse(int32_t x, int32_t y) {
+	void Application::UpdateMouse(uint32_t x, uint32_t y) {
 		pHasMouseFocus = true;
 
 		x -= pViewPos.x;
@@ -931,26 +1227,26 @@ namespace pixel {
 		if (pMousePos.y >= pScreenSize.y)	pMousePos.y = pScreenSize.y - 1;
 	}
 
-	void Application::UpdateMouseWheel(int32_t delta) {
+	void Application::UpdateMouseWheel(uint32_t delta) {
 		pMouseWheel += delta;
 	}
 
-	void Application::UpdateWindowSize(int32_t x, int32_t y) {
+	void Application::UpdateWindowSize(uint32_t x, uint32_t y) {
 		pWindowSize = vu2d(x, y);
 		UpdateViewport();
 	}
 
 	void Application::UpdateViewport() {
-		int32_t ww = pScreenSize.x * pScale;
-		int32_t wh = pScreenSize.y * pScale;
+		uint32_t ww = pScreenSize.x * pScale;
+		uint32_t wh = pScreenSize.y * pScale;
 		float wasp = (float) ww / (float) wh;
 
-		pViewSize.x = (int32_t) pWindowSize.x;
-		pViewSize.y = (int32_t) ((float) pViewSize.x / wasp);
+		pViewSize.x = (uint32_t) pWindowSize.x;
+		pViewSize.y = (uint32_t) ((float) pViewSize.x / wasp);
 
 		if(pViewSize.y > pWindowSize.y) {
 			pViewSize.y = pWindowSize.y;
-			pViewSize.x = (int32_t) ((float) pViewSize.y * wasp);
+			pViewSize.x = (uint32_t) ((float) pViewSize.y * wasp);
 		}
 
 		pViewPos = (pWindowSize - pViewSize) / 2;
@@ -960,11 +1256,11 @@ namespace pixel {
 		//! STUB: Implement function.
 	}
 
-	void Application::UpdateMouseState(int32_t button, bool state) {
+	void Application::UpdateMouseState(uint32_t button, bool state) {
 		pMouseButtonsNew[button] = state;
 	}
 
-	void Application::UpdateKeyState(int32_t key, bool state) {
+	void Application::UpdateKeyState(uint32_t key, bool state) {
 		pKeyboardKeysNew[key] = state;
 	}
 
@@ -1028,7 +1324,7 @@ namespace pixel {
 		return pElapsedTime;
 	}
 
-	uint32_t Application::FPS() const {
+	uint32_t Application::fps() const {
 		return pFrameRate;
 	}
 } 
@@ -1057,62 +1353,11 @@ namespace pixel {
 
   class ImageLoader_LibPNG : public ImageLoader {
 		virtual rcode LoadImage(Sprite* spr, const std::string& filename) {
-			if (std::filesystem::exists(filename)) return rcode::file_err;
+			//if (std::filesystem::exists(filename)) return rcode::file_err;
 			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
 
 			png_structp png;
 			png_infop info;
-
-			auto loadPNG = [&]() {
-				png_read_info(png, info);
-				png_byte color_type;
-				png_byte bit_depth;
-				png_bytep* row_pointers;
-
-				spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
-				color_type = png_get_color_type(png, info);
-				bit_depth = png_get_bit_depth(png, info);
-
-				if (bit_depth == 16) png_set_strip_16(png);
-				if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
-				if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
-				if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
-
-				if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
-					png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-				}
-
-				if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
-					png_set_gray_to_rgb(png);
-				}
-
-				png_read_update_info(png, info);
-				row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
-
-
-				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-					row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
-				}
-
-				png_read_image(png, row_pointers);
-				spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
-
-				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-					png_bytep row = row_pointers[y];
-
-					for (uint32_t x = 0; x < spr->GetSize().x; x++) {
-						png_bytep px = &(row[x * 4]);
-						spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
-					}
-				}
-
-				for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-					free(row_pointers[y]);
-				}
-
-				free(row_pointers);
-				png_destroy_read_struct(&png, &info, nullptr);
-			};
 
 			png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 
@@ -1139,11 +1384,60 @@ namespace pixel {
 				return rcode::err;
 			}
 
-			FILE* f = fopen(filename.c_str(), "rb");
+			FILE* f = fopen(filename.c_str(), "r");
 			if (!f) return rcode::file_err;
 
-			png_init_io(png, f);
-			loadPNG();
+			png_init_io(png, f);	
+			png_read_info(png, info);
+			
+			png_byte color_type;
+			png_byte bit_depth;
+			png_bytep* row_pointers;
+
+			spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
+			color_type = png_get_color_type(png, info);
+			bit_depth = png_get_bit_depth(png, info);
+
+			if (bit_depth == 16) png_set_strip_16(png);
+			if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+			if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
+			if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+
+			if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
+				png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+			}
+
+			if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+				png_set_gray_to_rgb(png);
+			}
+
+			png_read_update_info(png, info);
+			row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
+
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+			}
+
+			png_read_image(png, row_pointers);
+			spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				png_bytep row = row_pointers[y];
+
+				for (uint32_t x = 0; x < spr->GetSize().x; x++) {
+					png_bytep px = &(row[x * 4]);
+					spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
+				}
+			}
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				free(row_pointers[y]);
+			}
+
+			free(row_pointers);
+			png_destroy_read_struct(&png, &info, nullptr);
+			
 			fclose(f);
 
 			return rcode::ok;
@@ -1326,8 +1620,7 @@ namespace pixel {
 
 		virtual void ClearBuffer(Pixel p, bool depth) override {
 			glClearColor(float(p.v.r) / 255.0f, float(p.v.g) / 255.0f, float(p.v.b) / 255.0f, float(p.v.a) / 255.0f);
-			glClear(GL_COLOR_BUFFER_BIT);
-			if (depth) glClear(GL_DEPTH_BUFFER_BIT);
+			glClear(GL_COLOR_BUFFER_BIT | (depth ? GL_DEPTH_BUFFER_BIT : 0));
 		}
   };
 }

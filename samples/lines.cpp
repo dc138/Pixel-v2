@@ -4,7 +4,12 @@
 using namespace pixel;
 
 int main() {
-  Application app({.size = vu2d(500, 500), .name = "Lines", .mode = DrawingMode::FULL_ALPHA,
+  Application app({.size = vu2d(500, 500), .name = "Lines",
+  .on_launch = [] (Application& app) mutable -> pixel::rcode {
+    app.CreateSprite("samples/test.png"); // This is relative to the directory you run the program from, watch out!
+
+    return pixel::ok;
+  },
   .on_update = [] (Application& app) mutable -> pixel::rcode {
     for (uint8_t i = 0; i < 50; i++) {
       app.DrawLine(
@@ -14,10 +19,15 @@ int main() {
       );
     }
 
+    app.DrawSprite(app.MousePos(), 0);
+
     if(app.KeyboardKey(Key::ESCAPE).pressed) {
 			app.Close();
 		}
 
+    return pixel::ok;
+  },
+  .on_close = [] (Application& app) mutable -> pixel::rcode {
     return pixel::ok;
   }});
 
