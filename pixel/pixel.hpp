@@ -48,7 +48,7 @@
     SAMPLE PROGRAM:
     ~~~~~~~~~~~~~~~
 
-    The folowing program will create a wimple application window and draw 50 random
+    The folowing program will create a simple application window and draw 50 random
     lines (color and position) every frame.
 
     #include <iostream>
