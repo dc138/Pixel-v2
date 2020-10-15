@@ -102,23 +102,21 @@
 #pragma once
 
 #ifdef __linux__
-  #define PIXEL_LINUX
+	#define PIXEL_LINUX
 #elif defined(_WIN32)
-  #define PIXEL_WIN
+	#define PIXEL_WIN
 #elif defined(__APPLE__)
-  #define PIXEL_MACOS
+	#define PIXEL_MACOS
 #else
   #error "Unsupported platform."
 #endif
 
 #ifndef PIXEL_USE_DIRECTX
   #define PIXEL_USE_OPENGL
-#endif
-
-#ifdef PIXEL_WIN
-  #define PIXEL_USE_GDI
 #else
-  #define PIXEL_USE_LIBPNG
+	#ifdef PIXEL_LINUX
+		#error "DirectX cannot be used with a linux build."
+	#endif
 #endif
 
 #define PIXEL_VERSION_MAJOR 2
@@ -135,7 +133,7 @@
 #include <vector>
 #include <thread>
 #include <filesystem>
-#include <stdlib.h>
+#include <any>
 
 /*
 ___________________________
@@ -179,31 +177,29 @@ namespace pixel {
 		v2d(T x, T y): x(x), y(y) {}
 		v2d(const v2d& v): x(v.x), y(v.y) {}
 
-		T prod() const { return x * y; }
+		T prod() const noexcept { return x * y; }
 
-		v2d operator + (const T& rhs) const { return v2d(this->x + rhs, this->y + rhs); }
-		v2d operator - (const T& rhs) const { return v2d(this->x - rhs, this->y - rhs); }
-		v2d operator * (const T& rhs) const { return v2d(this->x * rhs, this->y * rhs); }
-		v2d operator / (const T& rhs) const { return v2d(this->x / rhs, this->y / rhs); }
+		v2d operator + (const T& rhs) const noexcept { return v2d(this->x + rhs, this->y + rhs); }
+		v2d operator - (const T& rhs) const noexcept { return v2d(this->x - rhs, this->y - rhs); }
+		v2d operator * (const T& rhs) const noexcept { return v2d(this->x * rhs, this->y * rhs); }
+		v2d operator / (const T& rhs) const noexcept { return v2d(this->x / rhs, this->y / rhs); }
 
-		v2d operator + (const v2d& rhs) const { return v2d(this->x + rhs.x, this->y + rhs.y); }
-		v2d operator - (const v2d& rhs) const { return v2d(this->x - rhs.x, this->y - rhs.y); }
-		v2d operator * (const v2d& rhs) const { return v2d(this->x * rhs.x, this->y * rhs.y); }
-		v2d operator / (const v2d& rhs) const { return v2d(this->x / rhs.x, this->y / rhs.y); }
+		v2d operator + (const v2d& rhs) const noexcept { return v2d(this->x + rhs.x, this->y + rhs.y); }
+		v2d operator - (const v2d& rhs) const noexcept { return v2d(this->x - rhs.x, this->y - rhs.y); }
+		v2d operator * (const v2d& rhs) const noexcept { return v2d(this->x * rhs.x, this->y * rhs.y); }
+		v2d operator / (const v2d& rhs) const noexcept { return v2d(this->x / rhs.x, this->y / rhs.y); }
 
-		v2d& operator += (const T& rhs) { this->x += rhs; this->y += rhs; return *this; }
-		v2d& operator -= (const T& rhs) { this->x -= rhs; this->y -= rhs; return *this; }
-		v2d& operator *= (const T& rhs) { this->x *= rhs; this->y *= rhs; return *this; }
-		v2d& operator /= (const T& rhs) { this->x /= rhs; this->y /= rhs; return *this; }
+		v2d& operator += (const T& rhs) noexcept { this->x += rhs; this->y += rhs; return *this; }
+		v2d& operator -= (const T& rhs) noexcept { this->x -= rhs; this->y -= rhs; return *this; }
+		v2d& operator *= (const T& rhs) noexcept { this->x *= rhs; this->y *= rhs; return *this; }
+		v2d& operator /= (const T& rhs) noexcept { this->x /= rhs; this->y /= rhs; return *this; }
 
-		v2d& operator += (const v2d& rhs) { this->x += rhs.x; this->y += rhs.y; return *this; }
-		v2d& operator -= (const v2d& rhs) { this->x -= rhs.x; this->y -= rhs.y; return *this; }
-		v2d& operator *= (const v2d& rhs) { this->x *= rhs.x; this->y *= rhs.y; return *this; }
-		v2d& operator /= (const v2d& rhs) { this->x /= rhs.x; this->y /= rhs.y; return *this; }
+		v2d& operator += (const v2d& rhs) noexcept { this->x += rhs.x; this->y += rhs.y; return *this; }
+		v2d& operator -= (const v2d& rhs) noexcept { this->x -= rhs.x; this->y -= rhs.y; return *this; }
+		v2d& operator *= (const v2d& rhs) noexcept { this->x *= rhs.x; this->y *= rhs.y; return *this; }
+		v2d& operator /= (const v2d& rhs) noexcept { this->x /= rhs.x; this->y /= rhs.y; return *this; }
 
-		operator v2d<int32_t>() const { return { static_cast<int32_t>(this->x), static_cast<int32_t>(this->y) }; }
-		operator v2d<float  >() const { return { static_cast<float  >(this->x), static_cast<float  >(this->y) }; }
-		operator v2d<double >() const { return { static_cast<double >(this->x), static_cast<double >(this->y) }; }
+		template<typename U> operator v2d<U>() const noexcept { return { static_cast<U>(this->x), static_cast<U>(this->y) }; }
 	};
 
 	typedef v2d<int32_t > vi2d;
@@ -271,7 +267,7 @@ namespace pixel {
 
 		friend class Application;
 		friend class Renderer_OpenGL;
-		friend class ImageLoader;
+		friend class Platform_Linux;
 
   public:
     Sprite(const Sprite& src);
@@ -350,21 +346,14 @@ namespace pixel {
 		virtual rcode StartSystemEventLoop() = 0;
 		virtual rcode HandleSystemEvent() = 0;
 
+		virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
+		virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
+
 		Application* App;
 	};
 
-  class ImageLoader final {
-  public:
-    ImageLoader() = default;
-		virtual ~ImageLoader() = default;
-
-		virtual rcode LoadImage(Sprite* spr, const std::string& filename);
-		virtual rcode SaveImage(Sprite* spr, const std::string& filename);
-  };
-
 	static std::unique_ptr<Renderer> renderer;
 	static std::unique_ptr<Platform> platform;
-  static std::unique_ptr<ImageLoader> loader;
 	static std::map<size_t, uint8_t> pKeyMap;
 
   class Application final {
@@ -639,13 +628,13 @@ namespace pixel {
 	}
 
   rcode Sprite::LoadFromFile(const std::string& filename) {
-    rcode code = loader->LoadImage(this, filename);
+    rcode code = platform->LoadImage(this, filename);
 		if (code == rcode::ok) Update();
 		return code;
   }
 
   rcode Sprite::SaveToFile(const std::string& filename) {
-    return loader->SaveImage(this, filename);
+    return platform->SaveImage(this, filename);
   }
 
   void Sprite::Update() {
@@ -853,8 +842,6 @@ namespace pixel {
 	}
 
 	void Application::Draw(const vu2d& pos, const Pixel& pixel) {
-		if ((pos.y * pScreenSize.x + pos.x) > pScreenSize.prod()) return;
-
 		if (pos.x >= pScreenSize.x) return;
 		if (pos.y >= pScreenSize.y) return;
 
@@ -868,7 +855,7 @@ namespace pixel {
 			float g = a * (float) pixel.v.g + c * (float) d.v.g;
 			float b = a * (float) pixel.v.b + c * (float) d.v.b;
 
-			pBuffer[pos.y * pScreenSize.x + pos.x] = Pixel((uint8_t) r, (uint8_t) g, (uint8_t) b);
+			pBuffer[pos.y * pScreenSize.x + pos.x].n = (uint8_t)r | ((uint8_t)g << 8) | ((uint8_t)b << 16) | (255 << 24);
 
 		} else if (pDrawingMode == DrawingMode::NO_ALPHA) {
 			pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
@@ -1329,128 +1316,6 @@ namespace pixel {
 	}
 } 
 
-
-/*
-____________________________
-
-    Image Implamentations
-____________________________
-
-*/
-
-#ifdef PIXEL_USE_GDI
-  #error "Currently unsupported image loader."
-#endif /* PIXEL_USE_GDI*/
-
-#ifdef PIXEL_USE_LIBPNG
-#include <png.h>
-
-namespace pixel {
-	void pngReadStream(png_structp pngPtr, png_bytep data, png_size_t length) {
-		png_voidp a = png_get_io_ptr(pngPtr);
-		((std::istream*)a)->read((char*)data, length);
-	}
-
-  rcode ImageLoader::LoadImage(Sprite* spr, const std::string& filename) {
-			//if (std::filesystem::exists(filename)) return rcode::file_err;
-			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
-
-			png_structp png;
-			png_infop info;
-
-			png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-
-			if (!png) {
-				spr->SetSize(0, 0);
-				spr->pBuffer = nullptr;
-
-				return rcode::err;
-			}
-
-			info = png_create_info_struct(png);
-
-			if (!info) {
-				spr->SetSize(0, 0);
-				spr->pBuffer = nullptr;
-
-				return rcode::err;
-			}
-
-			if (setjmp(png_jmpbuf(png))) {
-				spr->SetSize(0, 0);
-				spr->pBuffer = nullptr;
-
-				return rcode::err;
-			}
-
-			FILE* f = fopen(filename.c_str(), "r");
-			if (!f) return rcode::file_err;
-
-			png_init_io(png, f);	
-			png_read_info(png, info);
-			
-			png_byte color_type;
-			png_byte bit_depth;
-			png_bytep* row_pointers;
-
-			spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
-			color_type = png_get_color_type(png, info);
-			bit_depth = png_get_bit_depth(png, info);
-
-			if (bit_depth == 16) png_set_strip_16(png);
-			if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
-			if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
-			if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
-
-			if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
-				png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-			}
-
-			if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
-				png_set_gray_to_rgb(png);
-			}
-
-			png_read_update_info(png, info);
-			row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
-
-
-			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-				row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
-			}
-
-			png_read_image(png, row_pointers);
-			spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
-
-			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-				png_bytep row = row_pointers[y];
-
-				for (uint32_t x = 0; x < spr->GetSize().x; x++) {
-					png_bytep px = &(row[x * 4]);
-					spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
-				}
-			}
-
-			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-				free(row_pointers[y]);
-			}
-
-			free(row_pointers);
-			png_destroy_read_struct(&png, &info, nullptr);
-			
-			fclose(f);
-
-			return rcode::ok;
-		}
-
-		rcode ImageLoader::SaveImage(Sprite* spr, const std::string& filename) {
-			IGNORE(spr);
-			IGNORE(filename);
-
-			return rcode::ok;
-		}
-}
-#endif /* PIXEL_USE_LIBPNG */
-
 /*
 ____________________________
 
@@ -1626,7 +1491,14 @@ ____________________________
 
 #ifdef PIXEL_LINUX
 
+#include <png.h>
+
 namespace pixel {
+	void pngReadStream(png_structp pngPtr, png_bytep data, png_size_t length) {
+		png_voidp a = png_get_io_ptr(pngPtr);
+		((std::istream*)a)->read((char*)data, length);
+	}
+
   class Platform_Linux : public Platform {
   private:
 		X11::Display* pDisplay = nullptr;
@@ -1851,6 +1723,104 @@ namespace pixel {
 			
 			return rcode::ok; 
     }
+
+  	virtual rcode LoadImage(Sprite* spr, const std::string& filename) override {
+			//if (std::filesystem::exists(filename)) return rcode::file_err;
+			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
+
+			png_structp png;
+			png_infop info;
+
+			png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+			if (!png) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			info = png_create_info_struct(png);
+
+			if (!info) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			if (setjmp(png_jmpbuf(png))) {
+				spr->SetSize(0, 0);
+				spr->pBuffer = nullptr;
+
+				return rcode::err;
+			}
+
+			FILE* f = fopen(filename.c_str(), "r");
+			if (!f) return rcode::file_err;
+
+			png_init_io(png, f);	
+			png_read_info(png, info);
+			
+			png_byte color_type;
+			png_byte bit_depth;
+			png_bytep* row_pointers;
+
+			spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
+			color_type = png_get_color_type(png, info);
+			bit_depth = png_get_bit_depth(png, info);
+
+			if (bit_depth == 16) png_set_strip_16(png);
+			if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+			if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
+			if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+
+			if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
+				png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+			}
+
+			if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+				png_set_gray_to_rgb(png);
+			}
+
+			png_read_update_info(png, info);
+			row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
+
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+			}
+
+			png_read_image(png, row_pointers);
+			spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				png_bytep row = row_pointers[y];
+
+				for (uint32_t x = 0; x < spr->GetSize().x; x++) {
+					png_bytep px = &(row[x * 4]);
+					spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
+				}
+			}
+
+			for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+				free(row_pointers[y]);
+			}
+
+			free(row_pointers);
+			png_destroy_read_struct(&png, &info, nullptr);
+			
+			fclose(f);
+
+			return rcode::ok;
+		}
+
+		virtual rcode SaveImage(Sprite* spr, const std::string& filename) override {
+			IGNORE(spr);
+			IGNORE(filename);
+
+			return rcode::ok;
+		}
   };
 }
 
@@ -1874,9 +1844,6 @@ ____________________________
 
 namespace pixel {
   void Application::pConfigureSystem() {
-
-  	loader = std::make_unique<ImageLoader>();
-
 
 #ifdef PIXEL_USE_DIRECTX
     renderer = std::make_unique<Renderer_DirectX>();
