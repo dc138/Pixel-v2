@@ -133,7 +133,6 @@
 #include <vector>
 #include <thread>
 #include <filesystem>
-#include <any>
 
 /*
 ___________________________
@@ -145,8 +144,8 @@ ___________________________
 
 namespace pixel {
   enum rcode { ok = 0, err = 1, file_err = 2, abort = 3 };
-  class Application;
   class Sprite;
+	template<typename... UserData> class Application;
 
   struct Button {
 		bool pressed = false;
@@ -265,9 +264,11 @@ namespace pixel {
 		Sprite(uint32_t w, uint32_t h);
     ~Sprite();
 
-		friend class Application;
-		friend class Renderer_OpenGL;
-		friend class Platform_Linux;
+		template<typename... UserData> friend class Application;
+		template<typename... UserData> friend class Renderer_OpenGL;
+		template<typename... UserData> friend class Platform_Linux;
+		friend class UniversalRenderer_OpenGL;
+		friend class UniversalPlatform_Linux;
 
   public:
     Sprite(const Sprite& src);
@@ -304,9 +305,20 @@ namespace pixel {
 		Pixel pTint = White;
 	};
 
-  class Renderer {
+	class UniversalRenderer {
 	public:
-		virtual ~Renderer() = default;
+		virtual ~UniversalRenderer() = default;
+
+		virtual uint32_t CreateTexture(uint32_t width, uint32_t height) = 0;
+		virtual uint32_t DeleteTexture(uint32_t id) = 0;
+		virtual void UpdateTexture(uint32_t id, Sprite* spr) = 0;
+		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) = 0;
+		virtual void ApplyTexture(uint32_t id) = 0;
+	};
+
+  template<typename... UserData> class ApplicationRenderer {
+	public:
+		virtual ~ApplicationRenderer() = default;
 
 		virtual void PrepareDevice() = 0;
 		virtual rcode CreateDevice(std::vector<void*> params, bool fullscreen, bool vsync) = 0;
@@ -317,21 +329,23 @@ namespace pixel {
 		virtual void DrawLayerQuad() = 0;
 		virtual void DrawDecalQuad(const Sprite& sprite) = 0;
 
-		virtual uint32_t CreateTexture(uint32_t width, uint32_t height) = 0;
-		virtual uint32_t DeleteTexture(uint32_t id) = 0;
-		virtual void UpdateTexture(uint32_t id, Sprite* spr) = 0;
-		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) = 0;
-		virtual void ApplyTexture(uint32_t id) = 0;
-
 		virtual void UpdateViewport(const vu2d& pos, const vu2d& size) = 0;
 		virtual void ClearBuffer(Pixel p, bool depth) = 0;
 
-    Application* App;
+    Application<UserData...>* App = nullptr;
 	};
 
-	class Platform {
+	class UniversalPlatform {
 	public:
-		virtual ~Platform() = default;
+		virtual ~UniversalPlatform() = default;
+
+		virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
+		virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
+	};
+
+	template<typename... UserData> class ApplicationPlatform {
+	public:
+		virtual ~ApplicationPlatform() = default;
 
 		virtual rcode ApplicationStartUp() = 0;
 		virtual rcode ApplicationCleanUp() = 0;
@@ -346,19 +360,16 @@ namespace pixel {
 		virtual rcode StartSystemEventLoop() = 0;
 		virtual rcode HandleSystemEvent() = 0;
 
-		virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
-		virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
-
-		Application* App;
+		Application<UserData...>* App = nullptr;
 	};
 
-	static std::unique_ptr<Renderer> renderer;
-	static std::unique_ptr<Platform> platform;
-	static std::map<size_t, uint8_t> pKeyMap;
+	static std::map<size_t, uint8_t> KeyMap;
+	static std::unique_ptr<UniversalPlatform> uplatform;
+	static std::unique_ptr<UniversalRenderer> urenderer;
 
-  class Application final {
+  template<typename... UserData> class Application final {
   public:
-    typedef rcode (*callback_t)(Application&);
+    typedef rcode (*callback_t)(Application<UserData...>&);
 		typedef struct {
 			vu2d size = vu2d(256, 256);
 			vu2d position = vu2d(25, 25);
@@ -379,7 +390,7 @@ namespace pixel {
 		Application(params_t params);
 		~Application();
 
-		friend class Platform_Linux;
+		template<typename...> friend class Platform_Linux;
 
 	public:
 		rcode Launch();
@@ -406,6 +417,8 @@ namespace pixel {
 		Sprite& GetSprite(uint32_t id);
 
   public:
+		void Clear(const Pixel& color = Black);
+
 		void Draw(const vu2d& pos, const Pixel& pixel);
 		void DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel);
 
@@ -486,7 +499,16 @@ namespace pixel {
 		std::atomic<bool> pShouldExist {false};
 
 	private:
-		std::map<size_t, uint8_t> pKeyMap;
+		std::tuple<UserData...> pUserData;
+
+	public:
+		template<size_t I> constexpr std::tuple_element<I, std::tuple<UserData...>>::type& get() noexcept {
+    	return std::get<I>(pUserData);
+  	}
+
+	private:
+		std::unique_ptr<ApplicationRenderer<UserData...>> renderer;
+		std::unique_ptr<ApplicationPlatform<UserData...>> platform;
 
 		vu2d pMousePos;
 		uint32_t pMouseWheel = 0;
@@ -563,7 +585,7 @@ namespace pixel {
 
   Sprite::~Sprite() {
     if(pBuffer) delete[] pBuffer;
-    if(pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(pBufferId);
+    if(pBufferId != 0xFFFFFFFF) urenderer->DeleteTexture(pBufferId);
   }
 
   Sprite::Sprite(const std::string& filename) {
@@ -628,21 +650,21 @@ namespace pixel {
 	}
 
   rcode Sprite::LoadFromFile(const std::string& filename) {
-    rcode code = platform->LoadImage(this, filename);
+    rcode code = uplatform->LoadImage(this, filename);
 		if (code == rcode::ok) Update();
 		return code;
   }
 
   rcode Sprite::SaveToFile(const std::string& filename) {
-    return platform->SaveImage(this, filename);
+    return uplatform->SaveImage(this, filename);
   }
 
   void Sprite::Update() {
-    if(pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(pBufferId);
+    if(pBufferId != 0xFFFFFFFF) urenderer->DeleteTexture(pBufferId);
 
-    pBufferId = renderer->CreateTexture(this->pSize.x, this->pSize.y);
-    renderer->ApplyTexture(pBufferId);
-    renderer->UpdateTexture(pBufferId, this);
+    pBufferId = urenderer->CreateTexture(this->pSize.x, this->pSize.y);
+    urenderer->ApplyTexture(pBufferId);
+    urenderer->UpdateTexture(pBufferId, this);
   }
 
 	void Sprite::Swap(Sprite& other) noexcept {
@@ -660,7 +682,7 @@ namespace pixel {
 }
 
 namespace pixel {
-	Application::Application(Application::params_t params) {
+	template<typename... UserData> Application<UserData...>::Application(Application::params_t params) {
 		pConfigureSystem();
 		
 		pWindowSize = params.size * params.scale;
@@ -683,9 +705,9 @@ namespace pixel {
 		pOnClose = params.on_close;
 	}
 
-	Application::~Application() {}
+	template<typename... UserData> Application<UserData...>::~Application() {}
 
-	void Application::pEngineThread() {
+	template<typename... UserData> void Application<UserData...>::pEngineThread() {
 		if (platform->ThreadStartUp() == rcode::err) return;
 		if (platform->CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
 
@@ -696,8 +718,8 @@ namespace pixel {
       pBuffer[i] = Pixel();
     }
 
-		pBufferId = renderer->CreateTexture(pScreenSize.x, pScreenSize.y);
-		renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+		pBufferId = urenderer->CreateTexture(pScreenSize.x, pScreenSize.y);
+		urenderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
 
 		pClock1 = std::chrono::system_clock::now();
 		pClock2 = std::chrono::system_clock::now();
@@ -717,11 +739,11 @@ namespace pixel {
 		}
 		
 		delete[] pBuffer;
-		renderer->DeleteTexture(pBufferId);
+		urenderer->DeleteTexture(pBufferId);
 		platform->ThreadCleanUp();
 	}
 
-  void Application::pUpdate() {
+  template<typename... UserData> void Application<UserData...>::pUpdate() {
 		pClock2 = std::chrono::system_clock::now();
 		pElapsedTimer = pClock2 - pClock1;
 		pClock1 = pClock2;
@@ -787,12 +809,12 @@ namespace pixel {
 		renderer->ClearBuffer(Black, true);
 		renderer->PrepareDrawing();
 
-		renderer->ApplyTexture(pBufferId);
-		renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+		urenderer->ApplyTexture(pBufferId);
+		urenderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
 		renderer->DrawLayerQuad();
 
 		for (auto& s : pSpritesPending) {
-			renderer->ApplyTexture(s->pBufferId);
+			urenderer->ApplyTexture(s->pBufferId);
 			renderer->DrawDecalQuad(*s);
 		}
 
@@ -800,14 +822,14 @@ namespace pixel {
 		renderer->DisplayFrame();
 	}
 
-	rcode Application::Launch() {
+	template<typename... UserData> rcode Application<UserData...>::Launch() {
 		if (platform->ApplicationStartUp() != rcode::ok) return rcode::err;
 		if (platform->CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
 
 		UpdateViewport();
 		
 		pShouldExist = true;
-		std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+		std::thread thread = std::thread(&pixel::Application<UserData...>::pEngineThread, this);
 
 		platform->StartSystemEventLoop();
 
@@ -817,31 +839,37 @@ namespace pixel {
 		return rcode::ok;
 	}
 
-	void Application::Close() {
+	template<typename... UserData> void Application<UserData...>::Close() {
 		pShouldExist = false;
 	}
 
-	void Application::SetName(const std::string& name) {
+	template<typename... UserData> void Application<UserData...>::SetName(const std::string& name) {
 		pWindowName = name;
 	}
 
-	void Application::SetDrawingMode(pixel::DrawingMode mode) {
+	template<typename... UserData> void Application<UserData...>::SetDrawingMode(pixel::DrawingMode mode) {
 		pDrawingMode = mode;
 	}
 
-	void Application::CreateSprite(const std::string& filename) {
+	template<typename... UserData> void Application<UserData...>::CreateSprite(const std::string& filename) {
 		pSprites.push_back(Sprite(filename));
 	}
 	
-	void Application::CreateSprite(uint32_t w, uint32_t h) {
+	template<typename... UserData> void Application<UserData...>::CreateSprite(uint32_t w, uint32_t h) {
 		pSprites.push_back(Sprite(w, h));
 	}
 
-	Sprite& Application::GetSprite(uint32_t id) {
+	template<typename... UserData> Sprite& Application<UserData...>::GetSprite(uint32_t id) {
 		return pSprites.at(id);
 	}
 
-	void Application::Draw(const vu2d& pos, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::Clear(const Pixel& color) {
+		for (uint32_t i = 0; i < pScreenSize.prod(); i++) {
+			pBuffer[i] = color;
+		}
+	}
+
+	template<typename... UserData> void Application<UserData...>::Draw(const vu2d& pos, const Pixel& pixel) {
 		if (pos.x >= pScreenSize.x) return;
 		if (pos.y >= pScreenSize.y) return;
 
@@ -865,7 +893,7 @@ namespace pixel {
 		}
 	}
 
-	void Application::DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
 		int32_t x, y, dx, dy, dx1, dy1, px, py, xe, ye, i;
 		dx = pos2.x - pos1.x; dy = pos2.y - pos1.y;
 
@@ -935,7 +963,7 @@ namespace pixel {
 		}
 	}
 
-	void Application::DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
 		uint32_t x0 = 0;
 		uint32_t y0 = radius;
 		int d = 3 - 2 * radius;
@@ -957,7 +985,7 @@ namespace pixel {
 		}
 	}
 
-	void Application::FillCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::FillCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel) {
 		int x0 = 0;
 		int y0 = radius;
 		int d = 3 - 2 * radius;
@@ -980,14 +1008,14 @@ namespace pixel {
 		}
 	}
 
-	void Application::DrawRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::DrawRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
 		DrawLine(vu2d(pos1.x, pos1.y), vu2d(pos1.y, pos2.x), pixel);
 		DrawLine(vu2d(pos1.y, pos2.x), vu2d(pos2.x, pos2.y), pixel);
 		DrawLine(vu2d(pos2.x, pos2.y), vu2d(pos2.y, pos1.x), pixel);
 		DrawLine(vu2d(pos2.y, pos1.x), vu2d(pos1.x, pos1.y), pixel);
 	}
 
-	void Application::FillRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::FillRect(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel) {
 		for(uint32_t x = std::min(pos1.x, pos2.x); x <= std::max(pos1.x, pos2.x); x++) {
 			for(uint32_t y = std::min(pos1.y, pos2.y); y <= std::max(pos1.y, pos2.y); y++) {
 				Draw(vu2d(x, y), pixel);
@@ -995,13 +1023,13 @@ namespace pixel {
 		}
 	}
 
-	void Application::DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
 		DrawLine(vu2d(pos1.x, pos1.y), vu2d(pos2.x, pos2.y), pixel);
 		DrawLine(vu2d(pos2.x, pos2.y), vu2d(pos3.x, pos3.y), pixel);
 		DrawLine(vu2d(pos3.x, pos3.y), vu2d(pos1.x, pos1.y), pixel);
 	}
 
-	void Application::FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
+	template<typename... UserData> void Application<UserData...>::FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel) {
 		auto drawline = [&] (int sx, int ex, int ny) {
 			for(int i = sx; i <= ex; i++)
 				Draw(vu2d(i, ny), pixel);
@@ -1158,7 +1186,7 @@ namespace pixel {
 		}
 	}
 
-	void Application::DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
+	template<typename... UserData> void Application<UserData...>::DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
 		Sprite& spr = pSprites.at(sprite);
 		
 		vf2d newpos = {
@@ -1201,7 +1229,7 @@ namespace pixel {
 		//! STUB: Implement function.
 	}*/
 
-	void Application::UpdateMouse(uint32_t x, uint32_t y) {
+	template<typename... UserData> void Application<UserData...>::UpdateMouse(uint32_t x, uint32_t y) {
 		pHasMouseFocus = true;
 
 		x -= pViewPos.x;
@@ -1214,16 +1242,16 @@ namespace pixel {
 		if (pMousePos.y >= pScreenSize.y)	pMousePos.y = pScreenSize.y - 1;
 	}
 
-	void Application::UpdateMouseWheel(uint32_t delta) {
+	template<typename... UserData> void Application<UserData...>::UpdateMouseWheel(uint32_t delta) {
 		pMouseWheel += delta;
 	}
 
-	void Application::UpdateWindowSize(uint32_t x, uint32_t y) {
+	template<typename... UserData> void Application<UserData...>::UpdateWindowSize(uint32_t x, uint32_t y) {
 		pWindowSize = vu2d(x, y);
 		UpdateViewport();
 	}
 
-	void Application::UpdateViewport() {
+	template<typename... UserData> void Application<UserData...>::UpdateViewport() {
 		uint32_t ww = pScreenSize.x * pScale;
 		uint32_t wh = pScreenSize.y * pScale;
 		float wasp = (float) ww / (float) wh;
@@ -1239,79 +1267,79 @@ namespace pixel {
 		pViewPos = (pWindowSize - pViewSize) / 2;
 	}
 
-	void Application::ConstructFontSheet() {
+	template<typename... UserData> void Application<UserData...>::ConstructFontSheet() {
 		//! STUB: Implement function.
 	}
 
-	void Application::UpdateMouseState(uint32_t button, bool state) {
+	template<typename... UserData> void Application<UserData...>::UpdateMouseState(uint32_t button, bool state) {
 		pMouseButtonsNew[button] = state;
 	}
 
-	void Application::UpdateKeyState(uint32_t key, bool state) {
+	template<typename... UserData> void Application<UserData...>::UpdateKeyState(uint32_t key, bool state) {
 		pKeyboardKeysNew[key] = state;
 	}
 
-	void Application::UpdateMouseFocus(bool state) {
+	template<typename... UserData> void Application<UserData...>::UpdateMouseFocus(bool state) {
 		pHasMouseFocus = state;
 	}
 
-	void Application::UpdateKeyFocus(bool state) {
+	template<typename... UserData> void Application<UserData...>::UpdateKeyFocus(bool state) {
 		pHasInputFocus = state;
 	}
 
-	bool Application::ShouldExist() const {
+	template<typename... UserData> bool Application<UserData...>::ShouldExist() const {
 		return pShouldExist;
 	}
 
-	pixel::DrawingMode Application::DrawingMode() const {
+	template<typename... UserData> pixel::DrawingMode Application<UserData...>::DrawingMode() const {
 		return pDrawingMode;
 	}
 
-	vu2d Application::DrawableSize() const {
+	template<typename... UserData> vu2d Application<UserData...>::DrawableSize() const {
 		return pScreenSize - 1;
 	}
 
-	const vu2d& Application::ScreenSize() const {
+	template<typename... UserData> const vu2d& Application<UserData...>::ScreenSize() const {
 		return pScreenSize;
 	}
 
-	const vu2d& Application::WindowSize() const {
+	template<typename... UserData> const vu2d& Application<UserData...>::WindowSize() const {
 		return pWindowSize;
 	}
 
-	const vu2d& Application::WindowPos() const {
+	template<typename... UserData> const vu2d& Application<UserData...>::WindowPos() const {
 		return pWindowPos;
 	}
 
-	const vu2d& Application::MousePos() const {
+	template<typename... UserData> const vu2d& Application<UserData...>::MousePos() const {
 		return pMousePos;
 	}
 
-	uint32_t Application::MouseWheel() const {
+	template<typename... UserData> uint32_t Application<UserData...>::MouseWheel() const {
 		return pMouseWheel;
 	}
 
-	const Button& Application::MouseLeft() const {
+	template<typename... UserData> const Button& Application<UserData...>::MouseLeft() const {
 		return pMouseButtons[0];
 	}
 
-	const Button& Application::MouseRight() const {
+	template<typename... UserData> const Button& Application<UserData...>::MouseRight() const {
 		return pMouseButtons[1];
 	}
 
-	const Button& Application::MouseMiddle() const {
+	template<typename... UserData> const Button& Application<UserData...>::MouseMiddle() const {
 		return pMouseButtons[2];
 	}
 
-	const Button& Application::KeyboardKey(Key key) const {
+	template<typename... UserData> const Button& Application<UserData...>::KeyboardKey(Key key) const {
 		return pKeyboardKeys[(uint8_t)key];
 	}
 
-	float Application::et() const {
+	template<typename... UserData> float Application<UserData...>::et() const {
 		return pElapsedTime;
 	}
 
-	uint32_t Application::fps() const {
+	template<typename... UserData> uint32_t Application<UserData...>::fps() const {
 		return pFrameRate;
 	}
 } 
@@ -1346,7 +1374,47 @@ ____________________________
 #endif /* PIXEL_USE_OPENGL */
 
 namespace pixel {
-  class Renderer_OpenGL : public Renderer {
+	class UniversalRenderer_OpenGL : public UniversalRenderer {
+		virtual uint32_t CreateTexture(uint32_t width, uint32_t height) override {
+			IGNORE(width);
+			IGNORE(height);
+
+			uint32_t id = 0;
+
+			glGenTextures(1, &id);
+			glBindTexture(GL_TEXTURE_2D, id);
+
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+
+			glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+			return id;
+		}
+
+		virtual uint32_t DeleteTexture(uint32_t id) override {
+			glDeleteTextures(1, &id);
+			return id;
+		}
+
+		virtual void UpdateTexture(uint32_t id, Sprite* spr) override {
+			IGNORE(id);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, spr->pSize.x, spr->pSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, spr->pBuffer);
+		}
+
+		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) override {
+			IGNORE(id);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+		}
+
+		virtual void ApplyTexture(uint32_t id) override {
+			glBindTexture(GL_TEXTURE_2D, id);
+		}
+	};
+
+  template<typename... UserData> class Renderer_OpenGL : public ApplicationRenderer<UserData...> {
 	private:
 		X11::Display* pDisplay = nullptr;
 		X11::Window* pWindow = nullptr;
@@ -1432,44 +1500,6 @@ namespace pixel {
 			glEnd();
 		}
 
-		virtual uint32_t CreateTexture(uint32_t width, uint32_t height) override {
-			IGNORE(width);
-			IGNORE(height);
-
-			uint32_t id = 0;
-
-			glGenTextures(1, &id);
-			glBindTexture(GL_TEXTURE_2D, id);
-
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-
-			glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-			return id;
-		}
-
-		virtual uint32_t DeleteTexture(uint32_t id) override {
-			glDeleteTextures(1, &id);
-			return id;
-		}
-
-		virtual void UpdateTexture(uint32_t id, Sprite* spr) override {
-			IGNORE(id);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, spr->pSize.x, spr->pSize.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, spr->pBuffer);
-		}
-
-		virtual void UpdateTexture(uint32_t id, uint32_t w, uint32_t h, Pixel* buffer) override {
-			IGNORE(id);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
-		}
-
-		virtual void ApplyTexture(uint32_t id) override {
-			glBindTexture(GL_TEXTURE_2D, id);
-		}
-
 		virtual void UpdateViewport(const vu2d& pos, const vu2d& size) override {
 			glViewport(pos.x, pos.y, size.x, size.y);
 		}
@@ -1499,232 +1529,9 @@ namespace pixel {
 		((std::istream*)a)->read((char*)data, length);
 	}
 
-  class Platform_Linux : public Platform {
-  private:
-		X11::Display* pDisplay = nullptr;
-		X11::Window pWindowRoot;
-		X11::Window pWindow;
-		X11::XVisualInfo* pVisualInfo;
-		X11::Colormap pColorMap;
-		X11::XSetWindowAttributes pWinAttr;
-
-  public:
-    virtual rcode ApplicationStartUp() override {
-      return rcode::ok;
-    }
-
-		virtual rcode ApplicationCleanUp() override {
-      return rcode::ok;
-    }
-
-		virtual rcode ThreadStartUp() override {
-      return rcode::ok;
-    }
-
-		virtual rcode ThreadCleanUp() override {
-      renderer->DestroyDevice();
-      return rcode::ok;
-    }
-
-		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
-      if(renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
-        renderer->UpdateViewport(viewpos, viewsize);
-				return rcode::ok;
-
-      } else {
-        return rcode::err;
-      }
-    }
-
-		virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) override {
-      using namespace X11;  
-      XInitThreads();
-
-      pDisplay = XOpenDisplay(NULL);
-			pWindowRoot = DefaultRootWindow(pDisplay);
-
-			GLint glAttr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
-			pVisualInfo = glXChooseVisual(pDisplay, 0, glAttr);
-			pColorMap = XCreateColormap(pDisplay, pWindowRoot, pVisualInfo->visual, AllocNone);
-			pWinAttr.colormap = pColorMap;
-
-			pWinAttr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask | StructureNotifyMask;
-
-			pWindow = XCreateWindow(pDisplay, pWindowRoot, winpos.x, winpos.y, winsize.x, winsize.y, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWColormap | CWEventMask, &pWinAttr);
-
-			Atom wmDelete = XInternAtom(pDisplay, "WM_DELETE_WINDOW", true);
-			XSetWMProtocols(pDisplay, pWindow, &wmDelete, 1);
-
-			XMapWindow(pDisplay, pWindow);
-			XStoreName(pDisplay, pWindow, "Pixel Engine");
-
-      if (fullscreen) {
-				Atom wm_state;
-				Atom fs;
-
-				wm_state = XInternAtom(pDisplay, "_NET_WM_STATE", False);
-				fs = XInternAtom(pDisplay, "_NET_WM_STATE_FULLSCREEN", False);
-
-				XEvent event {0};
-				event.type = ClientMessage;
-				event.xclient.window = pWindow;
-				event.xclient.message_type = wm_state;
-				event.xclient.format = 32;
-				event.xclient.data.l[0] = (fullscreen ? 1 : 0);
-				event.xclient.data.l[1] = fs;
-				event.xclient.data.l[2] = 0;
-				event.xclient.data.l[3] = 0;                    
-
-				XMapWindow(pDisplay, pWindow);
-				XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
-				XFlush(pDisplay);
-
-				XWindowAttributes gwa;
-				XGetWindowAttributes(pDisplay, pWindow, &gwa);
-				
-        winsize.x = gwa.width;
-				winsize.y = gwa.height;
-			}
-
-      pKeyMap[0x00] = (uint8_t) Key::NONE;
-			
-			pKeyMap[0x61] = (uint8_t) Key::A; pKeyMap[0x6E] = (uint8_t) Key::N; 
-			pKeyMap[0x62] = (uint8_t) Key::B; pKeyMap[0x6F] = (uint8_t) Key::O;
-			pKeyMap[0x63] = (uint8_t) Key::C; pKeyMap[0x70] = (uint8_t) Key::P; 
-			pKeyMap[0x64] = (uint8_t) Key::D; pKeyMap[0x71] = (uint8_t) Key::Q; 
-			pKeyMap[0x65] = (uint8_t) Key::E; pKeyMap[0x72] = (uint8_t) Key::R; 
-			pKeyMap[0x66] = (uint8_t) Key::F; pKeyMap[0x73] = (uint8_t) Key::S; 
-			pKeyMap[0x67] = (uint8_t) Key::G; pKeyMap[0x74] = (uint8_t) Key::T;
-			pKeyMap[0x68] = (uint8_t) Key::H; pKeyMap[0x75] = (uint8_t) Key::U; 
-			pKeyMap[0x69] = (uint8_t) Key::I; pKeyMap[0x76] = (uint8_t) Key::V; 
-			pKeyMap[0x6A] = (uint8_t) Key::J; pKeyMap[0x77] = (uint8_t) Key::W; 
-			pKeyMap[0x6B] = (uint8_t) Key::K; pKeyMap[0x78] = (uint8_t) Key::X; 
-			pKeyMap[0x6C] = (uint8_t) Key::L; pKeyMap[0x79] = (uint8_t) Key::Y;
-			pKeyMap[0x6D] = (uint8_t) Key::M; pKeyMap[0x7A] = (uint8_t) Key::Z;
-
-			pKeyMap[XK_F1] = (uint8_t) Key::F1; pKeyMap[XK_F7] = (uint8_t) Key::F7; 
-			pKeyMap[XK_F2] = (uint8_t) Key::F2; pKeyMap[XK_F8] = (uint8_t) Key::F8;
-			pKeyMap[XK_F3] = (uint8_t) Key::F3; pKeyMap[XK_F9] = (uint8_t) Key::F9; 
-			pKeyMap[XK_F4] = (uint8_t) Key::F4; pKeyMap[XK_F10] = (uint8_t) Key::F10; 
-			pKeyMap[XK_F5] = (uint8_t) Key::F5; pKeyMap[XK_F11] = (uint8_t) Key::F11; 
-			pKeyMap[XK_F6] = (uint8_t) Key::F6; pKeyMap[XK_F12] = (uint8_t) Key::F12;
-			
-			pKeyMap[XK_Down] = (uint8_t) Key::DOWN; pKeyMap[XK_Up] = (uint8_t) Key::UP;
-			pKeyMap[XK_Left] = (uint8_t) Key::LEFT; pKeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
-			pKeyMap[XK_Right] = (uint8_t) Key::RIGHT; pKeyMap[XK_Return] = (uint8_t) Key::ENTER;
-			
-			pKeyMap[XK_BackSpace] = (uint8_t) Key::BACK;  pKeyMap[XK_Page_Up] = (uint8_t) Key::PGUP;
-			pKeyMap[XK_Escape] = (uint8_t) Key::ESCAPE; pKeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;	
-			pKeyMap[XK_Linefeed] = (uint8_t) Key::ENTER; pKeyMap[XK_Insert] = (uint8_t) Key::INS;
-			pKeyMap[XK_Pause] = (uint8_t) Key::PAUSE; pKeyMap[XK_Shift_L] = (uint8_t) Key::SHIFT;
-			pKeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL; pKeyMap[XK_Shift_R] = (uint8_t) Key::SHIFT; 
-			pKeyMap[XK_Tab] = (uint8_t) Key::TAB; pKeyMap[XK_Control_L] = (uint8_t) Key::CTRL; 
-			pKeyMap[XK_Delete] = (uint8_t) Key::DEL; pKeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
-			pKeyMap[XK_Home] = (uint8_t) Key::HOME; pKeyMap[XK_space] = (uint8_t) Key::SPACE;
-			pKeyMap[XK_End] = (uint8_t) Key::END;  pKeyMap[XK_period] = (uint8_t) Key::PERIOD;
-
-			pKeyMap[XK_0] = (uint8_t) Key::K0; pKeyMap[XK_5] = (uint8_t) Key::K5; 
-			pKeyMap[XK_1] = (uint8_t) Key::K1; pKeyMap[XK_6] = (uint8_t) Key::K6; 
-			pKeyMap[XK_2] = (uint8_t) Key::K2; pKeyMap[XK_7] = (uint8_t) Key::K7; 
-			pKeyMap[XK_3] = (uint8_t) Key::K3; pKeyMap[XK_8] = (uint8_t) Key::K8; 
-			pKeyMap[XK_4] = (uint8_t) Key::K4; pKeyMap[XK_9] = (uint8_t) Key::K9;
-
-			pKeyMap[XK_KP_0] = (uint8_t) Key::NP0; pKeyMap[XK_KP_5] = (uint8_t) Key::NP5; 
-			pKeyMap[XK_KP_1] = (uint8_t) Key::NP1; pKeyMap[XK_KP_6] = (uint8_t) Key::NP6; 
-			pKeyMap[XK_KP_2] = (uint8_t) Key::NP2; pKeyMap[XK_KP_7] = (uint8_t) Key::NP7;
-			pKeyMap[XK_KP_3] = (uint8_t) Key::NP3; pKeyMap[XK_KP_8] = (uint8_t) Key::NP8; 
-			pKeyMap[XK_KP_4] = (uint8_t) Key::NP4; pKeyMap[XK_KP_9] = (uint8_t) Key::NP9;
-		
-			pKeyMap[XK_KP_Multiply] = (uint8_t) Key::NP_MUL; 
-			pKeyMap[XK_KP_Add] = (uint8_t) Key::NP_ADD; 
-			pKeyMap[XK_KP_Divide] = (uint8_t) Key::NP_DIV; 
-			pKeyMap[XK_KP_Subtract] = (uint8_t) Key::NP_SUB;
-			pKeyMap[XK_KP_Decimal] = (uint8_t) Key::NP_DECIMAL;
-
-      return rcode::ok;
-    }
-
-		virtual rcode SetWindowTitle(const std::string& s) override {
-      X11::XStoreName(pDisplay, pWindow, s.c_str());
-			return rcode::ok;
-    }
-
-		virtual rcode StartSystemEventLoop() override {
-			return rcode::ok;
-    }
-
-		virtual rcode HandleSystemEvent() override { 
-			using namespace X11;
-
-			XEvent event;
-			while (XPending(pDisplay)) {
-				XNextEvent(pDisplay, &event);
-
-				if (event.type == ClientMessage) {
-					App->Close();
-
-				} else if (event.type == FocusOut) {
-					App->UpdateKeyFocus(false);
-					
-				} else if (event.type == FocusIn) {
-					App->UpdateKeyFocus(true);
-
-				} else if (event.type == MotionNotify) {
-					App->UpdateMouse(event.xmotion.x, event.xmotion.y);
-
-				} else if (event.type == ButtonPress) {
-					switch (event.xbutton.button) {
-					case 4:	App->UpdateMouseWheel(100); break;
-					case 5:	App->UpdateMouseWheel(-100); break;
-
-					case 1:	App->UpdateMouseState(0, true); break;
-					case 2:	App->UpdateMouseState(2, true); break;
-					case 3:	App->UpdateMouseState(1, true); break;
-
-					default: break;
-					}
-
-				} else if (event.type == ButtonRelease) {
-					switch (event.xbutton.button) {
-					case 1:	App->UpdateMouseState(0, false); break;
-					case 2:	App->UpdateMouseState(2, false); break;
-					case 3:	App->UpdateMouseState(1, false); break;
-
-					default: break;
-					}
-
-				} else if (event.type == KeyPress) {
-					KeySym s = XLookupKeysym(&event.xkey, 0);
-					App->UpdateKeyState(pKeyMap[s], true);
-
-					XKeyEvent* e = (XKeyEvent*)&event;
-					XLookupString(e, NULL, 0, &s, NULL);
-					App->UpdateKeyState(pKeyMap[s], true);
-
-				} else if (event.type == KeyRelease) {
-					KeySym s = XLookupKeysym(&event.xkey, 0);
-					App->UpdateKeyState(pKeyMap[s], false);
-
-					XKeyEvent* e = (XKeyEvent*)&event;
-					XLookupString(e, NULL, 0, &s, NULL);
-					App->UpdateKeyState(pKeyMap[s], false);
-
-				} else if (event.type == Expose) {
-					XWindowAttributes gwa;
-
-					XGetWindowAttributes(pDisplay, pWindow, &gwa);
-					App->UpdateWindowSize(gwa.width, gwa.height);
-
-				} else if (event.type == ConfigureNotify) {
-					XConfigureEvent xce = event.xconfigure;
-					App->UpdateWindowSize(xce.width, xce.height);
-				}
-			}
-			
-			return rcode::ok; 
-    }
-
-  	virtual rcode LoadImage(Sprite* spr, const std::string& filename) override {
+	class UniversalPlatform_Linux : public UniversalPlatform {
+	public:
+		virtual rcode LoadImage(Sprite* spr, const std::string& filename) override {
 			//if (std::filesystem::exists(filename)) return rcode::file_err;
 			if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
 
@@ -1821,6 +1628,232 @@ namespace pixel {
 
 			return rcode::ok;
 		}
+	};
+
+  template<typename... UserData> class Platform_Linux : public ApplicationPlatform<UserData...> {
+  private:
+		X11::Display* pDisplay = nullptr;
+		X11::Window pWindowRoot;
+		X11::Window pWindow;
+		X11::XVisualInfo* pVisualInfo;
+		X11::Colormap pColorMap;
+		X11::XSetWindowAttributes pWinAttr;
+
+  public:
+    virtual rcode ApplicationStartUp() override {
+      return rcode::ok;
+    }
+
+		virtual rcode ApplicationCleanUp() override {
+      return rcode::ok;
+    }
+
+		virtual rcode ThreadStartUp() override {
+      return rcode::ok;
+    }
+
+		virtual rcode ThreadCleanUp() override {
+      this->App->renderer->DestroyDevice();
+      return rcode::ok;
+    }
+
+		virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
+      if(this->App->renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
+        this->App->renderer->UpdateViewport(viewpos, viewsize);
+				return rcode::ok;
+
+      } else {
+        return rcode::err;
+      }
+    }
+
+		virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) override {
+      using namespace X11;  
+      XInitThreads();
+
+      pDisplay = XOpenDisplay(NULL);
+			pWindowRoot = DefaultRootWindow(pDisplay);
+
+			GLint glAttr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
+			pVisualInfo = glXChooseVisual(pDisplay, 0, glAttr);
+			pColorMap = XCreateColormap(pDisplay, pWindowRoot, pVisualInfo->visual, AllocNone);
+			pWinAttr.colormap = pColorMap;
+
+			pWinAttr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask | StructureNotifyMask;
+
+			pWindow = XCreateWindow(pDisplay, pWindowRoot, winpos.x, winpos.y, winsize.x, winsize.y, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWColormap | CWEventMask, &pWinAttr);
+
+			Atom wmDelete = XInternAtom(pDisplay, "WM_DELETE_WINDOW", true);
+			XSetWMProtocols(pDisplay, pWindow, &wmDelete, 1);
+
+			XMapWindow(pDisplay, pWindow);
+			XStoreName(pDisplay, pWindow, "Pixel Engine - Loading...");
+
+      if (fullscreen) {
+				Atom wm_state;
+				Atom fs;
+
+				wm_state = XInternAtom(pDisplay, "_NET_WM_STATE", False);
+				fs = XInternAtom(pDisplay, "_NET_WM_STATE_FULLSCREEN", False);
+
+				XEvent event {0};
+				event.type = ClientMessage;
+				event.xclient.window = pWindow;
+				event.xclient.message_type = wm_state;
+				event.xclient.format = 32;
+				event.xclient.data.l[0] = (fullscreen ? 1 : 0);
+				event.xclient.data.l[1] = fs;
+				event.xclient.data.l[2] = 0;
+				event.xclient.data.l[3] = 0;                    
+
+				XMapWindow(pDisplay, pWindow);
+				XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
+				XFlush(pDisplay);
+
+				XWindowAttributes gwa;
+				XGetWindowAttributes(pDisplay, pWindow, &gwa);
+				
+        winsize.x = gwa.width;
+				winsize.y = gwa.height;
+			}
+
+      KeyMap[0x00] = (uint8_t) Key::NONE;
+			
+			KeyMap[0x61] = (uint8_t) Key::A; KeyMap[0x6E] = (uint8_t) Key::N; 
+			KeyMap[0x62] = (uint8_t) Key::B; KeyMap[0x6F] = (uint8_t) Key::O;
+			KeyMap[0x63] = (uint8_t) Key::C; KeyMap[0x70] = (uint8_t) Key::P; 
+			KeyMap[0x64] = (uint8_t) Key::D; KeyMap[0x71] = (uint8_t) Key::Q; 
+			KeyMap[0x65] = (uint8_t) Key::E; KeyMap[0x72] = (uint8_t) Key::R; 
+			KeyMap[0x66] = (uint8_t) Key::F; KeyMap[0x73] = (uint8_t) Key::S; 
+			KeyMap[0x67] = (uint8_t) Key::G; KeyMap[0x74] = (uint8_t) Key::T;
+			KeyMap[0x68] = (uint8_t) Key::H; KeyMap[0x75] = (uint8_t) Key::U; 
+			KeyMap[0x69] = (uint8_t) Key::I; KeyMap[0x76] = (uint8_t) Key::V; 
+			KeyMap[0x6A] = (uint8_t) Key::J; KeyMap[0x77] = (uint8_t) Key::W; 
+			KeyMap[0x6B] = (uint8_t) Key::K; KeyMap[0x78] = (uint8_t) Key::X; 
+			KeyMap[0x6C] = (uint8_t) Key::L; KeyMap[0x79] = (uint8_t) Key::Y;
+			KeyMap[0x6D] = (uint8_t) Key::M; KeyMap[0x7A] = (uint8_t) Key::Z;
+
+			KeyMap[XK_F1] = (uint8_t) Key::F1; KeyMap[XK_F7] = (uint8_t) Key::F7; 
+			KeyMap[XK_F2] = (uint8_t) Key::F2; KeyMap[XK_F8] = (uint8_t) Key::F8;
+			KeyMap[XK_F3] = (uint8_t) Key::F3; KeyMap[XK_F9] = (uint8_t) Key::F9; 
+			KeyMap[XK_F4] = (uint8_t) Key::F4; KeyMap[XK_F10] = (uint8_t) Key::F10; 
+			KeyMap[XK_F5] = (uint8_t) Key::F5; KeyMap[XK_F11] = (uint8_t) Key::F11; 
+			KeyMap[XK_F6] = (uint8_t) Key::F6; KeyMap[XK_F12] = (uint8_t) Key::F12;
+			
+			KeyMap[XK_Down] = (uint8_t) Key::DOWN; KeyMap[XK_Up] = (uint8_t) Key::UP;
+			KeyMap[XK_Left] = (uint8_t) Key::LEFT; KeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
+			KeyMap[XK_Right] = (uint8_t) Key::RIGHT; KeyMap[XK_Return] = (uint8_t) Key::ENTER;
+			
+			KeyMap[XK_BackSpace] = (uint8_t) Key::BACK;  KeyMap[XK_Page_Up] = (uint8_t) Key::PGUP;
+			KeyMap[XK_Escape] = (uint8_t) Key::ESCAPE; KeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;	
+			KeyMap[XK_Linefeed] = (uint8_t) Key::ENTER; KeyMap[XK_Insert] = (uint8_t) Key::INS;
+			KeyMap[XK_Pause] = (uint8_t) Key::PAUSE; KeyMap[XK_Shift_L] = (uint8_t) Key::SHIFT;
+			KeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL; KeyMap[XK_Shift_R] = (uint8_t) Key::SHIFT; 
+			KeyMap[XK_Tab] = (uint8_t) Key::TAB; KeyMap[XK_Control_L] = (uint8_t) Key::CTRL; 
+			KeyMap[XK_Delete] = (uint8_t) Key::DEL; KeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
+			KeyMap[XK_Home] = (uint8_t) Key::HOME; KeyMap[XK_space] = (uint8_t) Key::SPACE;
+			KeyMap[XK_End] = (uint8_t) Key::END;  KeyMap[XK_period] = (uint8_t) Key::PERIOD;
+
+			KeyMap[XK_0] = (uint8_t) Key::K0; KeyMap[XK_5] = (uint8_t) Key::K5; 
+			KeyMap[XK_1] = (uint8_t) Key::K1; KeyMap[XK_6] = (uint8_t) Key::K6; 
+			KeyMap[XK_2] = (uint8_t) Key::K2; KeyMap[XK_7] = (uint8_t) Key::K7; 
+			KeyMap[XK_3] = (uint8_t) Key::K3; KeyMap[XK_8] = (uint8_t) Key::K8; 
+			KeyMap[XK_4] = (uint8_t) Key::K4; KeyMap[XK_9] = (uint8_t) Key::K9;
+
+			KeyMap[XK_KP_0] = (uint8_t) Key::NP0; KeyMap[XK_KP_5] = (uint8_t) Key::NP5; 
+			KeyMap[XK_KP_1] = (uint8_t) Key::NP1; KeyMap[XK_KP_6] = (uint8_t) Key::NP6; 
+			KeyMap[XK_KP_2] = (uint8_t) Key::NP2; KeyMap[XK_KP_7] = (uint8_t) Key::NP7;
+			KeyMap[XK_KP_3] = (uint8_t) Key::NP3; KeyMap[XK_KP_8] = (uint8_t) Key::NP8; 
+			KeyMap[XK_KP_4] = (uint8_t) Key::NP4; KeyMap[XK_KP_9] = (uint8_t) Key::NP9;
+		
+			KeyMap[XK_KP_Multiply] = (uint8_t) Key::NP_MUL; 
+			KeyMap[XK_KP_Add] = (uint8_t) Key::NP_ADD; 
+			KeyMap[XK_KP_Divide] = (uint8_t) Key::NP_DIV; 
+			KeyMap[XK_KP_Subtract] = (uint8_t) Key::NP_SUB;
+			KeyMap[XK_KP_Decimal] = (uint8_t) Key::NP_DECIMAL;
+
+      return rcode::ok;
+    }
+
+		virtual rcode SetWindowTitle(const std::string& s) override {
+      X11::XStoreName(pDisplay, pWindow, s.c_str());
+			return rcode::ok;
+    }
+
+		virtual rcode StartSystemEventLoop() override {
+			return rcode::ok;
+    }
+
+		virtual rcode HandleSystemEvent() override { 
+			using namespace X11;
+
+			XEvent event;
+			while (XPending(pDisplay)) {
+				XNextEvent(pDisplay, &event);
+
+				if (event.type == ClientMessage) {
+					this->App->Close();
+
+				} else if (event.type == FocusOut) {
+					this->App->UpdateKeyFocus(false);
+					
+				} else if (event.type == FocusIn) {
+					this->App->UpdateKeyFocus(true);
+
+				} else if (event.type == MotionNotify) {
+					this->App->UpdateMouse(event.xmotion.x, event.xmotion.y);
+
+				} else if (event.type == ButtonPress) {
+					switch (event.xbutton.button) {
+					case 4:	this->App->UpdateMouseWheel(100); break;
+					case 5:	this->App->UpdateMouseWheel(-100); break;
+
+					case 1:	this->App->UpdateMouseState(0, true); break;
+					case 2:	this->App->UpdateMouseState(2, true); break;
+					case 3:	this->App->UpdateMouseState(1, true); break;
+
+					default: break;
+					}
+
+				} else if (event.type == ButtonRelease) {
+					switch (event.xbutton.button) {
+					case 1:	this->App->UpdateMouseState(0, false); break;
+					case 2:	this->App->UpdateMouseState(2, false); break;
+					case 3:	this->App->UpdateMouseState(1, false); break;
+
+					default: break;
+					}
+
+				} else if (event.type == KeyPress) {
+					KeySym s = XLookupKeysym(&event.xkey, 0);
+					this->App->UpdateKeyState(KeyMap[s], true);
+
+					XKeyEvent* e = (XKeyEvent*)&event;
+					XLookupString(e, NULL, 0, &s, NULL);
+					this->App->UpdateKeyState(KeyMap[s], true);
+
+				} else if (event.type == KeyRelease) {
+					KeySym s = XLookupKeysym(&event.xkey, 0);
+					this->App->UpdateKeyState(KeyMap[s], false);
+
+					XKeyEvent* e = (XKeyEvent*)&event;
+					XLookupString(e, NULL, 0, &s, NULL);
+					this->App->UpdateKeyState(KeyMap[s], false);
+
+				} else if (event.type == Expose) {
+					XWindowAttributes gwa;
+
+					XGetWindowAttributes(pDisplay, pWindow, &gwa);
+					this->App->UpdateWindowSize(gwa.width, gwa.height);
+
+				} else if (event.type == ConfigureNotify) {
+					XConfigureEvent xce = event.xconfigure;
+					this->App->UpdateWindowSize(xce.width, xce.height);
+				}
+			}
+			
+			return rcode::ok; 
+    }
   };
 }
 
@@ -1843,19 +1876,21 @@ ____________________________
 */
 
 namespace pixel {
-  void Application::pConfigureSystem() {
+  template<typename... UserData> void Application<UserData...>::pConfigureSystem() {
 
 #ifdef PIXEL_USE_DIRECTX
     renderer = std::make_unique<Renderer_DirectX>();
 #endif
 
 #ifdef PIXEL_USE_OPENGL
-    renderer = std::make_unique<Renderer_OpenGL>();
+    renderer = std::make_unique<Renderer_OpenGL<UserData...>>();
+		urenderer = std::make_unique<UniversalRenderer_OpenGL>();
 #endif
 
 
 #ifdef PIXEL_LINUX
-    platform = std::make_unique<Platform_Linux>();
+    platform = std::make_unique<Platform_Linux<UserData...>>();
+		uplatform = std::make_unique<UniversalPlatform_Linux>();
 #endif
 
 #ifdef PIXEL_WIN
