@@ -4,11 +4,11 @@
 using namespace pixel;
 
 int main() {
-  Application<int> app({.size = vu2d(500, 500), .name = "Lines",
-  .on_launch = [] (decltype(app)& app) mutable -> pixel::rcode {
+  Application app({.size = vu2d(500, 500), .name = "Lines",
+  .on_launch = [] (Application& app) mutable -> pixel::rcode {
     return pixel::ok;
   },
-  .on_update = [] (decltype(app)& app) mutable -> pixel::rcode {
+  .on_update = [] (Application& app) mutable -> pixel::rcode {
     for (uint8_t i = 0; i < 50; i++) {
       app.DrawLine(
         vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
@@ -23,7 +23,7 @@ int main() {
 
     return pixel::ok;
   },
-  .on_close = [] (decltype(app)& app) mutable -> pixel::rcode {
+  .on_close = [] (Application& app) mutable -> pixel::rcode {
     return pixel::ok;
   }});
 
