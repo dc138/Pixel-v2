@@ -69,6 +69,8 @@
         "variant": "cpp",
         "version": "cpp",
         "*.rh": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "any": "cpp",
+        "codecvt": "cpp"
     }
 }

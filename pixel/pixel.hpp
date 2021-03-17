@@ -358,9 +358,7 @@ namespace pixel {
     Application* App;
   };
 
-  static std::unique_ptr<Helper>   helper;
-  static std::unique_ptr<Renderer> renderer;
-  static std::unique_ptr<Platform> platform;
+  Helper* helper;
   static std::map<size_t, uint8_t> pKeyMap;
 
   class Application final {
@@ -387,6 +385,7 @@ namespace pixel {
     ~Application();
 
     friend class Platform_Linux;
+    friend class Sprite;
 
   public:
     rcode Launch();
@@ -399,6 +398,10 @@ namespace pixel {
     callback_t pOnLaunch;
     callback_t pOnUpdate;
     callback_t pOnClose;
+
+  private:
+    Platform* platform;
+    Renderer* renderer;
 
   public:
     void Close();
@@ -690,7 +693,9 @@ namespace pixel {
     pOnClose = params.on_close;
   }
 
-  Application::~Application() {}
+  Application::~Application() {
+    delete platform;
+  }
 
   void Application::pEngineThread() {
     if (platform->ThreadStartUp() == rcode::err) return;
@@ -1631,17 +1636,17 @@ namespace pixel {
   }
 
   virtual rcode ThreadCleanUp() override {
-    renderer->DestroyDevice();
+    App->renderer->DestroyDevice();
     return rcode::ok;
   }
 
   virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
-    if(renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
-    renderer->UpdateViewport(viewpos, viewsize);
-        return rcode::ok;
+    if(App->renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
+      App->renderer->UpdateViewport(viewpos, viewsize);
+      return rcode::ok;
 
     } else {
-    return rcode::err;
+      return rcode::err;
     }
   }
 
@@ -1718,19 +1723,19 @@ namespace pixel {
     pKeyMap[XK_F5] = (uint8_t) Key::F5; pKeyMap[XK_F11] = (uint8_t) Key::F11; 
     pKeyMap[XK_F6] = (uint8_t) Key::F6; pKeyMap[XK_F12] = (uint8_t) Key::F12;
       
-    pKeyMap[XK_Down] = (uint8_t) Key::DOWN; pKeyMap[XK_Up] = (uint8_t) Key::UP;
-    pKeyMap[XK_Left] = (uint8_t) Key::LEFT; pKeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
+    pKeyMap[XK_Down]  = (uint8_t) Key::DOWN; pKeyMap[XK_Up] = (uint8_t) Key::UP;
+    pKeyMap[XK_Left]  = (uint8_t) Key::LEFT; pKeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
     pKeyMap[XK_Right] = (uint8_t) Key::RIGHT; pKeyMap[XK_Return] = (uint8_t) Key::ENTER;
       
-    pKeyMap[XK_BackSpace] = (uint8_t) Key::BACK;  pKeyMap[XK_Page_Up] = (uint8_t) Key::PGUP;
-    pKeyMap[XK_Escape] = (uint8_t) Key::ESCAPE; pKeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;	
-    pKeyMap[XK_Linefeed] = (uint8_t) Key::ENTER; pKeyMap[XK_Insert] = (uint8_t) Key::INS;
-    pKeyMap[XK_Pause] = (uint8_t) Key::PAUSE; pKeyMap[XK_Shift_L] = (uint8_t) Key::SHIFT;
-    pKeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL; pKeyMap[XK_Shift_R] = (uint8_t) Key::SHIFT; 
-    pKeyMap[XK_Tab] = (uint8_t) Key::TAB; pKeyMap[XK_Control_L] = (uint8_t) Key::CTRL; 
-    pKeyMap[XK_Delete] = (uint8_t) Key::DEL; pKeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
-    pKeyMap[XK_Home] = (uint8_t) Key::HOME; pKeyMap[XK_space] = (uint8_t) Key::SPACE;
-    pKeyMap[XK_End] = (uint8_t) Key::END;  pKeyMap[XK_period] = (uint8_t) Key::PERIOD;
+    pKeyMap[XK_BackSpace]   = (uint8_t) Key::BACK;    pKeyMap[XK_Page_Up]   = (uint8_t) Key::PGUP;
+    pKeyMap[XK_Escape]      = (uint8_t) Key::ESCAPE;  pKeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;	
+    pKeyMap[XK_Linefeed]    = (uint8_t) Key::ENTER;   pKeyMap[XK_Insert]    = (uint8_t) Key::INS;
+    pKeyMap[XK_Pause]       = (uint8_t) Key::PAUSE;   pKeyMap[XK_Shift_L]   = (uint8_t) Key::SHIFT;
+    pKeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL;  pKeyMap[XK_Shift_R]   = (uint8_t) Key::SHIFT; 
+    pKeyMap[XK_Tab]         = (uint8_t) Key::TAB;     pKeyMap[XK_Control_L] = (uint8_t) Key::CTRL; 
+    pKeyMap[XK_Delete]      = (uint8_t) Key::DEL;     pKeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
+    pKeyMap[XK_Home]        = (uint8_t) Key::HOME;    pKeyMap[XK_space]     = (uint8_t) Key::SPACE;
+    pKeyMap[XK_End]         = (uint8_t) Key::END;     pKeyMap[XK_period]    = (uint8_t) Key::PERIOD;
 
     pKeyMap[XK_0] = (uint8_t) Key::K0; pKeyMap[XK_5] = (uint8_t) Key::K5; 
     pKeyMap[XK_1] = (uint8_t) Key::K1; pKeyMap[XK_6] = (uint8_t) Key::K6; 
@@ -1745,10 +1750,10 @@ namespace pixel {
     pKeyMap[XK_KP_4] = (uint8_t) Key::NP4; pKeyMap[XK_KP_9] = (uint8_t) Key::NP9;
     
     pKeyMap[XK_KP_Multiply] = (uint8_t) Key::NP_MUL; 
-    pKeyMap[XK_KP_Add] = (uint8_t) Key::NP_ADD; 
-    pKeyMap[XK_KP_Divide] = (uint8_t) Key::NP_DIV; 
+    pKeyMap[XK_KP_Add]      = (uint8_t) Key::NP_ADD; 
+    pKeyMap[XK_KP_Divide]   = (uint8_t) Key::NP_DIV; 
     pKeyMap[XK_KP_Subtract] = (uint8_t) Key::NP_SUB;
-    pKeyMap[XK_KP_Decimal] = (uint8_t) Key::NP_DECIMAL;
+    pKeyMap[XK_KP_Decimal]  = (uint8_t) Key::NP_DECIMAL;
 
     return rcode::ok;
   }
@@ -1862,12 +1867,12 @@ namespace pixel {
 #   endif
 
 #   ifdef PIXEL_USE_OPENGL
-      renderer = std::make_unique<Renderer_OpenGL>();
+      renderer = new Renderer_OpenGL;
 #   endif
 
 #   ifdef PIXEL_LINUX
-      platform = std::make_unique<Platform_Linux>();
-      helper = std::make_unique<Helper_Linux>();
+      platform = new Platform_Linux;
+      if (!helper) helper = new Helper_Linux;
 #   endif
 
 #   ifdef PIXEL_WIN
