@@ -266,6 +266,7 @@ namespace pixel {
     ~Sprite();
 
     friend class Application;
+    friend class Helper_Linux;
     friend class Renderer_OpenGL;
     friend class Platform_Linux;
 
@@ -302,6 +303,14 @@ namespace pixel {
     vf2d pUv[4] = { vf2d(0.0f, 0.0f), vf2d(0.0f, 1.0f), vf2d(1.0f, 1.0f), vf2d(1.0f, 0.0f) };
     float pW[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     Pixel pTint = White;
+  };
+
+  class Helper {
+  public:
+    virtual ~Helper() = default;
+
+    virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
+    virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
   };
 
   class Renderer {
@@ -346,12 +355,10 @@ namespace pixel {
     virtual rcode StartSystemEventLoop() = 0;
     virtual rcode HandleSystemEvent() = 0;
 
-    virtual rcode LoadImage(Sprite* spr, const std::string& filename) = 0;
-    virtual rcode SaveImage(Sprite* spr, const std::string& filename) = 0;
-
     Application* App;
   };
 
+  static std::unique_ptr<Helper>   helper;
   static std::unique_ptr<Renderer> renderer;
   static std::unique_ptr<Platform> platform;
   static std::map<size_t, uint8_t> pKeyMap;
@@ -628,13 +635,13 @@ namespace pixel {
   }
 
   rcode Sprite::LoadFromFile(const std::string& filename) {
-    rcode code = platform->LoadImage(this, filename);
+    rcode code = helper->LoadImage(this, filename);
     if (code == rcode::ok) Update();
     return code;
   }
 
   rcode Sprite::SaveToFile(const std::string& filename) {
-    return platform->SaveImage(this, filename);
+    return helper->SaveImage(this, filename);
   }
 
   void Sprite::Update() {
@@ -1500,6 +1507,107 @@ namespace pixel {
     ((std::istream*)a)->read((char*)data, length);
   }
 
+  class Helper_Linux : public Helper {
+  public:
+    virtual rcode LoadImage(Sprite* spr, const std::string& filename) override {
+      //if (std::filesystem::exists(filename)) return rcode::file_err;
+      if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
+
+      png_structp png;
+      png_infop info;
+
+      png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+      if (!png) {
+        spr->SetSize(0, 0);
+        spr->pBuffer = nullptr;
+
+        return rcode::err;
+      }
+
+      info = png_create_info_struct(png);
+
+      if (!info) {
+        spr->SetSize(0, 0);
+        spr->pBuffer = nullptr;
+
+        return rcode::err;
+      }
+
+      if (setjmp(png_jmpbuf(png))) {
+        spr->SetSize(0, 0);
+        spr->pBuffer = nullptr;
+
+        return rcode::err;
+      }
+
+      FILE* f = fopen(filename.c_str(), "r");
+      if (!f) return rcode::file_err;
+
+      png_init_io(png, f);	
+      png_read_info(png, info);
+      
+      png_byte color_type;
+      png_byte bit_depth;
+      png_bytep* row_pointers;
+
+      spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
+      color_type = png_get_color_type(png, info);
+      bit_depth = png_get_bit_depth(png, info);
+
+      if (bit_depth == 16) png_set_strip_16(png);
+      if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+      if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
+      if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+
+      if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
+        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+      }
+
+      if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+        png_set_gray_to_rgb(png);
+      }
+
+      png_read_update_info(png, info);
+      row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
+
+
+      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+        row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+      }
+
+      png_read_image(png, row_pointers);
+      spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
+
+      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+        png_bytep row = row_pointers[y];
+
+        for (uint32_t x = 0; x < spr->GetSize().x; x++) {
+          png_bytep px = &(row[x * 4]);
+          spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
+        }
+      }
+
+      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
+        free(row_pointers[y]);
+      }
+
+      free(row_pointers);
+      png_destroy_read_struct(&png, &info, nullptr);
+      
+      fclose(f);
+
+      return rcode::ok;
+    }
+
+    virtual rcode SaveImage(Sprite* spr, const std::string& filename) override {
+      IGNORE(spr);
+      IGNORE(filename);
+
+      return rcode::ok;
+    }
+  };
+
   class Platform_Linux : public Platform {
   private:
     X11::Display* pDisplay = nullptr;
@@ -1723,105 +1831,8 @@ namespace pixel {
       }
       
       return rcode::ok; 
-  }
-
-    virtual rcode LoadImage(Sprite* spr, const std::string& filename) override {
-      //if (std::filesystem::exists(filename)) return rcode::file_err;
-      if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
-
-      png_structp png;
-      png_infop info;
-
-      png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-
-      if (!png) {
-        spr->SetSize(0, 0);
-        spr->pBuffer = nullptr;
-
-        return rcode::err;
-      }
-
-      info = png_create_info_struct(png);
-
-      if (!info) {
-        spr->SetSize(0, 0);
-        spr->pBuffer = nullptr;
-
-        return rcode::err;
-      }
-
-      if (setjmp(png_jmpbuf(png))) {
-        spr->SetSize(0, 0);
-        spr->pBuffer = nullptr;
-
-        return rcode::err;
-      }
-
-      FILE* f = fopen(filename.c_str(), "r");
-      if (!f) return rcode::file_err;
-
-      png_init_io(png, f);	
-      png_read_info(png, info);
-      
-      png_byte color_type;
-      png_byte bit_depth;
-      png_bytep* row_pointers;
-
-      spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
-      color_type = png_get_color_type(png, info);
-      bit_depth = png_get_bit_depth(png, info);
-
-      if (bit_depth == 16) png_set_strip_16(png);
-      if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
-      if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)	png_set_expand_gray_1_2_4_to_8(png);
-      if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
-
-      if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE) {
-        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-      }
-
-      if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
-        png_set_gray_to_rgb(png);
-      }
-
-      png_read_update_info(png, info);
-      row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * spr->GetSize().y);
-
-
-      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-        row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
-      }
-
-      png_read_image(png, row_pointers);
-      spr->pBuffer = new Pixel[spr->GetSize().x * spr->GetSize().y];
-
-      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-        png_bytep row = row_pointers[y];
-
-        for (uint32_t x = 0; x < spr->GetSize().x; x++) {
-          png_bytep px = &(row[x * 4]);
-          spr->pBuffer[y * spr->GetSize().x + x] = Pixel(px[0], px[1], px[2], px[3]);
-        }
-      }
-
-      for (uint32_t y = 0; y < spr->GetSize().y; y++) {
-        free(row_pointers[y]);
-      }
-
-      free(row_pointers);
-      png_destroy_read_struct(&png, &info, nullptr);
-      
-      fclose(f);
-
-      return rcode::ok;
     }
 
-    virtual rcode SaveImage(Sprite* spr, const std::string& filename) override {
-      IGNORE(spr);
-      IGNORE(filename);
-
-      return rcode::ok;
-    }
   };
 }
 
@@ -1856,14 +1867,17 @@ namespace pixel {
 
 #   ifdef PIXEL_LINUX
       platform = std::make_unique<Platform_Linux>();
+      helper = std::make_unique<Helper_Linux>();
 #   endif
 
 #   ifdef PIXEL_WIN
       platform = std::make_unique<Platform_Win>();
+      helper = std::make_unique<Helper_Win>();
 #   endif
 
 #   ifdef PIXEL_MACOS
       platform = std::make_unique<Platform_MacOS>();
+      helper = std::make_unique<Helper_MacOS>();
 #   endif
 
     platform->App = this;
