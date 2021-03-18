@@ -1,41 +1,41 @@
 /*
               _________________________
-              
+
                 The Pixel Library
               _________________________
 
 
   ABOUT:
   ~~~~~
-  
+
   A single file object oriented library to more easily create fast graphical
-  c++ applications that abstracts the  creation of windows and makes usng 
+  c++ applications that abstracts the  creation of windows and makes usng
   opengl much easier.
-  
-  It is intended to help newer programmers more easily make their first graphical 
+
+  It is intended to help newer programmers more easily make their first graphical
   application to learn the basics of 2d graphics, and later 3d graphics.
-  
+
   Only linux build are supported at the moment, as this library makes use of
   X11. Windows and MacOS are coming in the future.
-  
+
 
   LICENSE:
   ~~~~~~~
-  
+
   MIT License
 
   Copyright (c) 2020 Antonio de Haro
-  
+
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
   in the Software without restriction, including without limitation the rights
   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
   copies of the Software, and to permit persons to whom the Software is
   furnished to do so, subject to the following conditions:
-  
+
   The above copyright notice and this permission notice shall be included in all
   copies or substantial portions of the Software.
-  
+
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -137,7 +137,7 @@
 
 /*
 ___________________________
-    
+
   Header declarations
 ___________________________
 
@@ -289,7 +289,6 @@ namespace pixel {
     rcode SaveToFile(const std::string& filename);
 
   public:
-    void Update();
     void Swap(Sprite& other) noexcept;
 
   private:
@@ -352,7 +351,6 @@ namespace pixel {
     virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) = 0;
     virtual rcode SetWindowTitle(const std::string& s) = 0;
 
-    virtual rcode StartSystemEventLoop() = 0;
     virtual rcode HandleSystemEvent() = 0;
 
     Application* App;
@@ -388,7 +386,7 @@ namespace pixel {
     friend class Sprite;
 
   public:
-    rcode Launch();
+    rcode Launch(bool background = false);
 
   public:
     Application(const Application& other) = delete;
@@ -405,6 +403,7 @@ namespace pixel {
 
   public:
     void Close();
+    void EnsureClosed();
 
     void SetName(const std::string& name);
     void SetDrawingMode(pixel::DrawingMode mode);
@@ -414,6 +413,7 @@ namespace pixel {
     void CreateSprite(uint32_t w, uint32_t h);
 
     Sprite& GetSprite(uint32_t id);
+    void UpdateSprite(uint32_t id);
 
   public:
     void Draw(const vu2d& pos, const Pixel& pixel);
@@ -493,6 +493,7 @@ namespace pixel {
     bool pVsync = false;
     bool pFullScreen = false;
 
+    std::atomic<bool> pHasBeenClosed {false};
     std::atomic<bool> pShouldExist {false};
 
   private:
@@ -524,7 +525,6 @@ namespace pixel {
 
   private:
     void pEngineThread();
-    void pUpdate();
     void pConfigureSystem();
 
   private:
@@ -567,13 +567,10 @@ namespace pixel {
     for(uint32_t i = 0; i < w * h; i++) {
       pBuffer[i] = Pixel();
     }
-
-    Update();
   }
 
   Sprite::~Sprite() {
     if(pBuffer) delete[] pBuffer;
-    if(pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(pBufferId);
   }
 
   Sprite::Sprite(const std::string& filename) {
@@ -591,13 +588,11 @@ namespace pixel {
 
     pBuffer = new Pixel[src.pSize.prod()];
 
-  for(uint32_t i = 0; i < src.pSize.prod(); i++) {
-    pBuffer[i] = src.pBuffer[i];
+    for(uint32_t i = 0; i < src.pSize.prod(); i++) {
+      pBuffer[i] = src.pBuffer[i];
+    }
   }
 
-    Update();
-  }
-  
   Sprite& Sprite::operator=(const Sprite& rhs) {
     Sprite copy(rhs);
     Swap(copy);
@@ -639,20 +634,11 @@ namespace pixel {
 
   rcode Sprite::LoadFromFile(const std::string& filename) {
     rcode code = helper->LoadImage(this, filename);
-    if (code == rcode::ok) Update();
     return code;
   }
 
   rcode Sprite::SaveToFile(const std::string& filename) {
     return helper->SaveImage(this, filename);
-  }
-
-  void Sprite::Update() {
-    if(pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(pBufferId);
-
-    pBufferId = renderer->CreateTexture(this->pSize.x, this->pSize.y);
-    renderer->ApplyTexture(pBufferId);
-    renderer->UpdateTexture(pBufferId, this);
   }
 
   void Sprite::Swap(Sprite& other) noexcept {
@@ -672,7 +658,7 @@ namespace pixel {
 namespace pixel {
   Application::Application(Application::params_t params) {
     pConfigureSystem();
-    
+
     pWindowSize = params.size * params.scale;
     pWindowPos = params.position;
 
@@ -695,6 +681,7 @@ namespace pixel {
 
   Application::~Application() {
     delete platform;
+    delete renderer;
   }
 
   void Application::pEngineThread() {
@@ -704,9 +691,9 @@ namespace pixel {
     ConstructFontSheet();
 
     pBuffer = new Pixel[pScreenSize.prod()];
-    for(uint32_t i = 0; i < pScreenSize.prod(); i++) {
-    pBuffer[i] = Pixel();
-  }
+    for (uint32_t i = 0; i < pScreenSize.prod(); i++) {
+      pBuffer[i] = Pixel();
+    }
 
     pBufferId = renderer->CreateTexture(pScreenSize.x, pScreenSize.y);
     renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
@@ -720,117 +707,129 @@ namespace pixel {
 
     while (pShouldExist) {
       while (pShouldExist){
-        pUpdate();
+        pClock2 = std::chrono::system_clock::now();
+        pElapsedTimer = pClock2 - pClock1;
+        pClock1 = pClock2;
+        pElapsedTime = pElapsedTimer.count();
+
+        pFrameTimer += pElapsedTime;
+        pFrameCount++;
+
+        platform->HandleSystemEvent();
+
+        if(pFrameTimer >= 1.0f) {
+          pFrameRate = pFrameCount;
+          pFrameTimer -= 1.0f;
+
+          pWindowTittle = pWindowName + " - FPS: " + std::to_string(pFrameRate);
+          platform->SetWindowTitle(pWindowTittle);
+
+          pFrameCount = 0;
+        }
+
+        for(uint32_t i = 0; i < 3; i++) {
+          pMouseButtons[i].pressed = false;
+          pMouseButtons[i].released = false;
+
+          if(pMouseButtonsNew[i] != pMouseButtonsOld[i]) {
+            if(pMouseButtonsNew[i]) {
+              pMouseButtons[i].pressed = !pMouseButtons[i].held;
+              pMouseButtons[i].held = true;
+
+            } else {
+              pMouseButtons[i].released = true;
+              pMouseButtons[i].held = false;
+            }
+          }
+
+          pMouseButtonsOld[i] = pMouseButtonsNew[i];
+        }
+
+        for(uint32_t i = 0; i < 256; i++) {
+          pKeyboardKeys[i].pressed = false;
+          pKeyboardKeys[i].released = false;
+
+          if(pKeyboardKeysNew[i] != pKeyboardKeysOld[i]) {
+            if(pKeyboardKeysNew[i]) {
+
+              pKeyboardKeys[i].pressed = !pKeyboardKeys[i].held;
+              pKeyboardKeys[i].held = true;
+
+            } else {
+              pKeyboardKeys[i].released = true;
+              pKeyboardKeys[i].held = false;
+            }
+          }
+
+          pKeyboardKeysOld[i] = pKeyboardKeysNew[i];
+        }
+
+        if (pOnUpdate) {
+          if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
+        }
+
+        renderer->UpdateViewport(pViewPos, pViewSize);
+        renderer->ClearBuffer(Black, true);
+        renderer->PrepareDrawing();
+
+        renderer->ApplyTexture(pBufferId);
+        renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+        renderer->DrawLayerQuad();
+
+        for (auto& s : pSpritesPending) {
+          renderer->ApplyTexture(s->pBufferId);
+          renderer->DrawDecalQuad(*s);
+        }
+
+        pSpritesPending.clear();
+        renderer->DisplayFrame();
       }
-      
+
       if (pOnClose) {
         if (pOnClose(*this) != rcode::ok) pShouldExist = true;
       }
     }
-    
+
     delete[] pBuffer;
     renderer->DeleteTexture(pBufferId);
+
+    for (auto& s : pSprites) {
+      if (s.pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(s.pBufferId);
+    }
+
     platform->ThreadCleanUp();
+    platform->ApplicationCleanUp();
+
+    pHasBeenClosed = true;
   }
 
-  void Application::pUpdate() {
-    pClock2 = std::chrono::system_clock::now();
-    pElapsedTimer = pClock2 - pClock1;
-    pClock1 = pClock2;
-    pElapsedTime = pElapsedTimer.count();
+  rcode Application::Launch(bool background) {
+    if (pHasBeenClosed) return rcode::abort;
 
-    pFrameTimer += pElapsedTime;
-    pFrameCount++;
-
-    platform->HandleSystemEvent();
-
-    if(pFrameTimer >= 1.0f) {
-      pFrameRate = pFrameCount;
-      pFrameTimer -= 1.0f;
-
-      pWindowTittle = pWindowName + " - FPS: " + std::to_string(pFrameRate);
-      platform->SetWindowTitle(pWindowTittle);
-
-      pFrameCount = 0;
-    }
-
-    for(uint32_t i = 0; i < 3; i++) {
-      pMouseButtons[i].pressed = false;
-      pMouseButtons[i].released = false;
-
-      if(pMouseButtonsNew[i] != pMouseButtonsOld[i]) {
-        if(pMouseButtonsNew[i]) {
-          pMouseButtons[i].pressed = !pMouseButtons[i].held;
-          pMouseButtons[i].held = true;
-
-        } else {
-          pMouseButtons[i].released = true;
-          pMouseButtons[i].held = false;
-        }
-      }
-
-      pMouseButtonsOld[i] = pMouseButtonsNew[i];
-    }
-
-    for(uint32_t i = 0; i < 256; i++) {
-      pKeyboardKeys[i].pressed = false;
-      pKeyboardKeys[i].released = false;
-
-      if(pKeyboardKeysNew[i] != pKeyboardKeysOld[i]) {
-        if(pKeyboardKeysNew[i]) {
-
-          pKeyboardKeys[i].pressed = !pKeyboardKeys[i].held;
-          pKeyboardKeys[i].held = true;
-
-        } else {
-          pKeyboardKeys[i].released = true;
-          pKeyboardKeys[i].held = false;
-        }
-      }
-
-      pKeyboardKeysOld[i] = pKeyboardKeysNew[i];
-    }
-
-    if (pOnUpdate) {
-      if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
-    }
-
-    renderer->UpdateViewport(pViewPos, pViewSize);
-    renderer->ClearBuffer(Black, true);
-    renderer->PrepareDrawing();
-
-    renderer->ApplyTexture(pBufferId);
-    renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
-    renderer->DrawLayerQuad();
-
-    for (auto& s : pSpritesPending) {
-      renderer->ApplyTexture(s->pBufferId);
-      renderer->DrawDecalQuad(*s);
-    }
-
-    pSpritesPending.clear();
-    renderer->DisplayFrame();
-  }
-
-  rcode Application::Launch() {
     if (platform->ApplicationStartUp() != rcode::ok) return rcode::err;
     if (platform->CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
 
     UpdateViewport();
-    
+
     pShouldExist = true;
     std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+    
+    if (background) {
+      thread.detach();
 
-    platform->StartSystemEventLoop();
+    } else {
+      thread.join();
+    }
 
-    thread.join();
-
-    if (platform->ApplicationCleanUp() != rcode::ok) return rcode::err;
     return rcode::ok;
   }
 
   void Application::Close() {
     pShouldExist = false;
+  }
+
+  void Application::EnsureClosed() {
+    while (!pHasBeenClosed) {}
   }
 
   void Application::SetName(const std::string& name) {
@@ -843,14 +842,26 @@ namespace pixel {
 
   void Application::CreateSprite(const std::string& filename) {
     pSprites.push_back(Sprite(filename));
+    UpdateSprite(pSprites.size() - 1);
   }
-  
+
   void Application::CreateSprite(uint32_t w, uint32_t h) {
     pSprites.push_back(Sprite(w, h));
+    UpdateSprite(pSprites.size() - 1);
   }
 
   Sprite& Application::GetSprite(uint32_t id) {
     return pSprites.at(id);
+  }
+
+  void Application::UpdateSprite(uint32_t id) {
+    Sprite& s = pSprites.at(id);
+
+    if (s.pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(s.pBufferId);
+
+    s.pBufferId = renderer->CreateTexture(s.pSize.x, s.pSize.y);
+    renderer->ApplyTexture(s.pBufferId);
+    renderer->UpdateTexture(s.pBufferId, &s);
   }
 
   void Application::Draw(const vu2d& pos, const Pixel& pixel) {
@@ -1172,7 +1183,7 @@ namespace pixel {
 
   void Application::DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
     Sprite& spr = pSprites.at(sprite);
-    
+
     vf2d newpos = {
       (pos.x * pInvScreenSize.x) * 2.0f - 1.0f,
       ((pos.y * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
@@ -1189,7 +1200,7 @@ namespace pixel {
     spr.pPos[1] = { newpos.x, newsize.y };
     spr.pPos[2] = { newsize.x, newsize.y };
     spr.pPos[3] = { newsize.x, newpos.y };
-    
+
     pSpritesPending.push_back(&spr);
   }
 
@@ -1326,7 +1337,7 @@ namespace pixel {
   uint32_t Application::fps() const {
     return pFrameRate;
   }
-} 
+}
 
 /*
 ____________________________
@@ -1349,7 +1360,7 @@ ____________________________
 #     include <X11/X.h>
 #     include <X11/Xlib.h>
     }
-  
+
     typedef int(glSwapInterval_t)(X11::Display* dpy, X11::GLXDrawable drawable, int interval);
     static glSwapInterval_t* glSwapIntervalEXT;
 
@@ -1427,21 +1438,21 @@ namespace pixel {
 
       glEnd();
     }
-    
+
     virtual void DrawDecalQuad(const Sprite& sprite) override {
       glBegin(GL_QUADS);
-  
+
       glColor4ub(sprite.pTint.v.r, sprite.pTint.v.g, sprite.pTint.v.b, sprite.pTint.v.a);
 
-      glTexCoord4f(sprite.pUv[0].x, sprite.pUv[0].y, 0.0f, sprite.pW[0]); 
+      glTexCoord4f(sprite.pUv[0].x, sprite.pUv[0].y, 0.0f, sprite.pW[0]);
       glVertex2f(sprite.pPos[0].x, sprite.pPos[0].y);
-      glTexCoord4f(sprite.pUv[1].x, sprite.pUv[1].y, 0.0f, sprite.pW[1]); 
+      glTexCoord4f(sprite.pUv[1].x, sprite.pUv[1].y, 0.0f, sprite.pW[1]);
       glVertex2f(sprite.pPos[1].x, sprite.pPos[1].y);
-      glTexCoord4f(sprite.pUv[2].x, sprite.pUv[2].y, 0.0f, sprite.pW[2]); 
+      glTexCoord4f(sprite.pUv[2].x, sprite.pUv[2].y, 0.0f, sprite.pW[2]);
       glVertex2f(sprite.pPos[2].x, sprite.pPos[2].y);
-      glTexCoord4f(sprite.pUv[3].x, sprite.pUv[3].y, 0.0f, sprite.pW[3]); 
+      glTexCoord4f(sprite.pUv[3].x, sprite.pUv[3].y, 0.0f, sprite.pW[3]);
       glVertex2f(sprite.pPos[3].x, sprite.pPos[3].y);
-      
+
       glEnd();
     }
 
@@ -1549,9 +1560,9 @@ namespace pixel {
       FILE* f = fopen(filename.c_str(), "r");
       if (!f) return rcode::file_err;
 
-      png_init_io(png, f);	
+      png_init_io(png, f);
       png_read_info(png, info);
-      
+
       png_byte color_type;
       png_byte bit_depth;
       png_bytep* row_pointers;
@@ -1599,7 +1610,7 @@ namespace pixel {
 
       free(row_pointers);
       png_destroy_read_struct(&png, &info, nullptr);
-      
+
       fclose(f);
 
       return rcode::ok;
@@ -1623,151 +1634,150 @@ namespace pixel {
     X11::XSetWindowAttributes pWinAttr;
 
   public:
-  virtual rcode ApplicationStartUp() override {
-    return rcode::ok;
-  }
-
-  virtual rcode ApplicationCleanUp() override {
-    return rcode::ok;
-  }
-
-  virtual rcode ThreadStartUp() override {
-    return rcode::ok;
-  }
-
-  virtual rcode ThreadCleanUp() override {
-    App->renderer->DestroyDevice();
-    return rcode::ok;
-  }
-
-  virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
-    if(App->renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
-      App->renderer->UpdateViewport(viewpos, viewsize);
+    virtual rcode ApplicationStartUp() override {
       return rcode::ok;
-
-    } else {
-      return rcode::err;
     }
-  }
 
-  virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) override {
-    using namespace X11;  
-    XInitThreads();
+    virtual rcode ApplicationCleanUp() override {
+      X11::XCloseDisplay(pDisplay);
+      X11::XDestroyWindow(pDisplay, pWindow);
+      
+      return rcode::ok;
+    }
 
-    pDisplay = XOpenDisplay(NULL);
-    pWindowRoot = DefaultRootWindow(pDisplay);
+    virtual rcode ThreadStartUp() override {
+      return rcode::ok;
+    }
 
-    GLint glAttr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
-    pVisualInfo = glXChooseVisual(pDisplay, 0, glAttr);
-    pColorMap = XCreateColormap(pDisplay, pWindowRoot, pVisualInfo->visual, AllocNone);
-    pWinAttr.colormap = pColorMap;
+    virtual rcode ThreadCleanUp() override {
+      App->renderer->DestroyDevice();
+      return rcode::ok;
+    }
 
-    pWinAttr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask | StructureNotifyMask;
+    virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
+      if(App->renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
+        App->renderer->UpdateViewport(viewpos, viewsize);
+        return rcode::ok;
 
-    pWindow = XCreateWindow(pDisplay, pWindowRoot, winpos.x, winpos.y, winsize.x, winsize.y, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWColormap | CWEventMask, &pWinAttr);
+      } else {
+        return rcode::err;
+      }
+    }
 
-    Atom wmDelete = XInternAtom(pDisplay, "WM_DELETE_WINDOW", true);
-    XSetWMProtocols(pDisplay, pWindow, &wmDelete, 1);
+    virtual rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen) override {
+      using namespace X11;
+      XInitThreads();
 
-    XMapWindow(pDisplay, pWindow);
-    XStoreName(pDisplay, pWindow, "Pixel Engine");
+      pDisplay = XOpenDisplay(NULL);
+      pWindowRoot = DefaultRootWindow(pDisplay);
 
-    if (fullscreen) {
-      Atom wm_state;
-      Atom fs;
+      GLint glAttr[] = { GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None };
+      pVisualInfo = glXChooseVisual(pDisplay, 0, glAttr);
+      pColorMap = XCreateColormap(pDisplay, pWindowRoot, pVisualInfo->visual, AllocNone);
+      pWinAttr.colormap = pColorMap;
 
-      wm_state = XInternAtom(pDisplay, "_NET_WM_STATE", False);
-      fs = XInternAtom(pDisplay, "_NET_WM_STATE_FULLSCREEN", False);
+      pWinAttr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | FocusChangeMask | StructureNotifyMask;
 
-      XEvent event {0};
-      event.type = ClientMessage;
-      event.xclient.window = pWindow;
-      event.xclient.message_type = wm_state;
-      event.xclient.format = 32;
-      event.xclient.data.l[0] = (fullscreen ? 1 : 0);
-      event.xclient.data.l[1] = fs;
-      event.xclient.data.l[2] = 0;
-      event.xclient.data.l[3] = 0;                    
+      pWindow = XCreateWindow(pDisplay, pWindowRoot, winpos.x, winpos.y, winsize.x, winsize.y, 0, pVisualInfo->depth, InputOutput, pVisualInfo->visual, CWColormap | CWEventMask, &pWinAttr);
+
+      Atom wmDelete = XInternAtom(pDisplay, "WM_DELETE_WINDOW", true);
+      XSetWMProtocols(pDisplay, pWindow, &wmDelete, 1);
 
       XMapWindow(pDisplay, pWindow);
-      XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
-      XFlush(pDisplay);
+      XStoreName(pDisplay, pWindow, "Pixel Engine");
 
-      XWindowAttributes gwa;
-      XGetWindowAttributes(pDisplay, pWindow, &gwa);
-        
-      winsize.x = gwa.width;
-      winsize.y = gwa.height;
+      if (fullscreen) {
+        Atom wm_state;
+        Atom fs;
+
+        wm_state = XInternAtom(pDisplay, "_NET_WM_STATE", False);
+        fs = XInternAtom(pDisplay, "_NET_WM_STATE_FULLSCREEN", False);
+
+        XEvent event {0};
+        event.type = ClientMessage;
+        event.xclient.window = pWindow;
+        event.xclient.message_type = wm_state;
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = (fullscreen ? 1 : 0);
+        event.xclient.data.l[1] = fs;
+        event.xclient.data.l[2] = 0;
+        event.xclient.data.l[3] = 0;
+
+        XMapWindow(pDisplay, pWindow);
+        XSendEvent(pDisplay, DefaultRootWindow(pDisplay), False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
+        XFlush(pDisplay);
+
+        XWindowAttributes gwa;
+        XGetWindowAttributes(pDisplay, pWindow, &gwa);
+
+        winsize.x = gwa.width;
+        winsize.y = gwa.height;
+      }
+
+      pKeyMap[0x00] = (uint8_t) Key::NONE;
+
+      pKeyMap[0x61] = (uint8_t) Key::A; pKeyMap[0x6E] = (uint8_t) Key::N;
+      pKeyMap[0x62] = (uint8_t) Key::B; pKeyMap[0x6F] = (uint8_t) Key::O;
+      pKeyMap[0x63] = (uint8_t) Key::C; pKeyMap[0x70] = (uint8_t) Key::P;
+      pKeyMap[0x64] = (uint8_t) Key::D; pKeyMap[0x71] = (uint8_t) Key::Q;
+      pKeyMap[0x65] = (uint8_t) Key::E; pKeyMap[0x72] = (uint8_t) Key::R;
+      pKeyMap[0x66] = (uint8_t) Key::F; pKeyMap[0x73] = (uint8_t) Key::S;
+      pKeyMap[0x67] = (uint8_t) Key::G; pKeyMap[0x74] = (uint8_t) Key::T;
+      pKeyMap[0x68] = (uint8_t) Key::H; pKeyMap[0x75] = (uint8_t) Key::U;
+      pKeyMap[0x69] = (uint8_t) Key::I; pKeyMap[0x76] = (uint8_t) Key::V;
+      pKeyMap[0x6A] = (uint8_t) Key::J; pKeyMap[0x77] = (uint8_t) Key::W;
+      pKeyMap[0x6B] = (uint8_t) Key::K; pKeyMap[0x78] = (uint8_t) Key::X;
+      pKeyMap[0x6C] = (uint8_t) Key::L; pKeyMap[0x79] = (uint8_t) Key::Y;
+      pKeyMap[0x6D] = (uint8_t) Key::M; pKeyMap[0x7A] = (uint8_t) Key::Z;
+
+      pKeyMap[XK_F1] = (uint8_t) Key::F1; pKeyMap[XK_F7] = (uint8_t) Key::F7;
+      pKeyMap[XK_F2] = (uint8_t) Key::F2; pKeyMap[XK_F8] = (uint8_t) Key::F8;
+      pKeyMap[XK_F3] = (uint8_t) Key::F3; pKeyMap[XK_F9] = (uint8_t) Key::F9;
+      pKeyMap[XK_F4] = (uint8_t) Key::F4; pKeyMap[XK_F10] = (uint8_t) Key::F10;
+      pKeyMap[XK_F5] = (uint8_t) Key::F5; pKeyMap[XK_F11] = (uint8_t) Key::F11;
+      pKeyMap[XK_F6] = (uint8_t) Key::F6; pKeyMap[XK_F12] = (uint8_t) Key::F12;
+
+      pKeyMap[XK_Down]  = (uint8_t) Key::DOWN; pKeyMap[XK_Up] = (uint8_t) Key::UP;
+      pKeyMap[XK_Left]  = (uint8_t) Key::LEFT; pKeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
+      pKeyMap[XK_Right] = (uint8_t) Key::RIGHT; pKeyMap[XK_Return] = (uint8_t) Key::ENTER;
+
+      pKeyMap[XK_BackSpace]   = (uint8_t) Key::BACK;    pKeyMap[XK_Page_Up]   = (uint8_t) Key::PGUP;
+      pKeyMap[XK_Escape]      = (uint8_t) Key::ESCAPE;  pKeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;
+      pKeyMap[XK_Linefeed]    = (uint8_t) Key::ENTER;   pKeyMap[XK_Insert]    = (uint8_t) Key::INS;
+      pKeyMap[XK_Pause]       = (uint8_t) Key::PAUSE;   pKeyMap[XK_Shift_L]   = (uint8_t) Key::SHIFT;
+      pKeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL;  pKeyMap[XK_Shift_R]   = (uint8_t) Key::SHIFT;
+      pKeyMap[XK_Tab]         = (uint8_t) Key::TAB;     pKeyMap[XK_Control_L] = (uint8_t) Key::CTRL;
+      pKeyMap[XK_Delete]      = (uint8_t) Key::DEL;     pKeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
+      pKeyMap[XK_Home]        = (uint8_t) Key::HOME;    pKeyMap[XK_space]     = (uint8_t) Key::SPACE;
+      pKeyMap[XK_End]         = (uint8_t) Key::END;     pKeyMap[XK_period]    = (uint8_t) Key::PERIOD;
+
+      pKeyMap[XK_0] = (uint8_t) Key::K0; pKeyMap[XK_5] = (uint8_t) Key::K5;
+      pKeyMap[XK_1] = (uint8_t) Key::K1; pKeyMap[XK_6] = (uint8_t) Key::K6;
+      pKeyMap[XK_2] = (uint8_t) Key::K2; pKeyMap[XK_7] = (uint8_t) Key::K7;
+      pKeyMap[XK_3] = (uint8_t) Key::K3; pKeyMap[XK_8] = (uint8_t) Key::K8;
+      pKeyMap[XK_4] = (uint8_t) Key::K4; pKeyMap[XK_9] = (uint8_t) Key::K9;
+
+      pKeyMap[XK_KP_0] = (uint8_t) Key::NP0; pKeyMap[XK_KP_5] = (uint8_t) Key::NP5;
+      pKeyMap[XK_KP_1] = (uint8_t) Key::NP1; pKeyMap[XK_KP_6] = (uint8_t) Key::NP6;
+      pKeyMap[XK_KP_2] = (uint8_t) Key::NP2; pKeyMap[XK_KP_7] = (uint8_t) Key::NP7;
+      pKeyMap[XK_KP_3] = (uint8_t) Key::NP3; pKeyMap[XK_KP_8] = (uint8_t) Key::NP8;
+      pKeyMap[XK_KP_4] = (uint8_t) Key::NP4; pKeyMap[XK_KP_9] = (uint8_t) Key::NP9;
+
+      pKeyMap[XK_KP_Multiply] = (uint8_t) Key::NP_MUL;
+      pKeyMap[XK_KP_Add]      = (uint8_t) Key::NP_ADD;
+      pKeyMap[XK_KP_Divide]   = (uint8_t) Key::NP_DIV;
+      pKeyMap[XK_KP_Subtract] = (uint8_t) Key::NP_SUB;
+      pKeyMap[XK_KP_Decimal]  = (uint8_t) Key::NP_DECIMAL;
+
+      return rcode::ok;
     }
 
-    pKeyMap[0x00] = (uint8_t) Key::NONE;
-      
-    pKeyMap[0x61] = (uint8_t) Key::A; pKeyMap[0x6E] = (uint8_t) Key::N; 
-    pKeyMap[0x62] = (uint8_t) Key::B; pKeyMap[0x6F] = (uint8_t) Key::O;
-    pKeyMap[0x63] = (uint8_t) Key::C; pKeyMap[0x70] = (uint8_t) Key::P; 
-    pKeyMap[0x64] = (uint8_t) Key::D; pKeyMap[0x71] = (uint8_t) Key::Q; 
-    pKeyMap[0x65] = (uint8_t) Key::E; pKeyMap[0x72] = (uint8_t) Key::R; 
-    pKeyMap[0x66] = (uint8_t) Key::F; pKeyMap[0x73] = (uint8_t) Key::S; 
-    pKeyMap[0x67] = (uint8_t) Key::G; pKeyMap[0x74] = (uint8_t) Key::T;
-    pKeyMap[0x68] = (uint8_t) Key::H; pKeyMap[0x75] = (uint8_t) Key::U; 
-    pKeyMap[0x69] = (uint8_t) Key::I; pKeyMap[0x76] = (uint8_t) Key::V; 
-    pKeyMap[0x6A] = (uint8_t) Key::J; pKeyMap[0x77] = (uint8_t) Key::W; 
-    pKeyMap[0x6B] = (uint8_t) Key::K; pKeyMap[0x78] = (uint8_t) Key::X; 
-    pKeyMap[0x6C] = (uint8_t) Key::L; pKeyMap[0x79] = (uint8_t) Key::Y;
-    pKeyMap[0x6D] = (uint8_t) Key::M; pKeyMap[0x7A] = (uint8_t) Key::Z;
-
-    pKeyMap[XK_F1] = (uint8_t) Key::F1; pKeyMap[XK_F7] = (uint8_t) Key::F7; 
-    pKeyMap[XK_F2] = (uint8_t) Key::F2; pKeyMap[XK_F8] = (uint8_t) Key::F8;
-    pKeyMap[XK_F3] = (uint8_t) Key::F3; pKeyMap[XK_F9] = (uint8_t) Key::F9; 
-    pKeyMap[XK_F4] = (uint8_t) Key::F4; pKeyMap[XK_F10] = (uint8_t) Key::F10; 
-    pKeyMap[XK_F5] = (uint8_t) Key::F5; pKeyMap[XK_F11] = (uint8_t) Key::F11; 
-    pKeyMap[XK_F6] = (uint8_t) Key::F6; pKeyMap[XK_F12] = (uint8_t) Key::F12;
-      
-    pKeyMap[XK_Down]  = (uint8_t) Key::DOWN; pKeyMap[XK_Up] = (uint8_t) Key::UP;
-    pKeyMap[XK_Left]  = (uint8_t) Key::LEFT; pKeyMap[XK_KP_Enter] = (uint8_t) Key::ENTER;
-    pKeyMap[XK_Right] = (uint8_t) Key::RIGHT; pKeyMap[XK_Return] = (uint8_t) Key::ENTER;
-      
-    pKeyMap[XK_BackSpace]   = (uint8_t) Key::BACK;    pKeyMap[XK_Page_Up]   = (uint8_t) Key::PGUP;
-    pKeyMap[XK_Escape]      = (uint8_t) Key::ESCAPE;  pKeyMap[XK_Page_Down] = (uint8_t) Key::PGDN;	
-    pKeyMap[XK_Linefeed]    = (uint8_t) Key::ENTER;   pKeyMap[XK_Insert]    = (uint8_t) Key::INS;
-    pKeyMap[XK_Pause]       = (uint8_t) Key::PAUSE;   pKeyMap[XK_Shift_L]   = (uint8_t) Key::SHIFT;
-    pKeyMap[XK_Scroll_Lock] = (uint8_t) Key::SCROLL;  pKeyMap[XK_Shift_R]   = (uint8_t) Key::SHIFT; 
-    pKeyMap[XK_Tab]         = (uint8_t) Key::TAB;     pKeyMap[XK_Control_L] = (uint8_t) Key::CTRL; 
-    pKeyMap[XK_Delete]      = (uint8_t) Key::DEL;     pKeyMap[XK_Control_R] = (uint8_t) Key::CTRL;
-    pKeyMap[XK_Home]        = (uint8_t) Key::HOME;    pKeyMap[XK_space]     = (uint8_t) Key::SPACE;
-    pKeyMap[XK_End]         = (uint8_t) Key::END;     pKeyMap[XK_period]    = (uint8_t) Key::PERIOD;
-
-    pKeyMap[XK_0] = (uint8_t) Key::K0; pKeyMap[XK_5] = (uint8_t) Key::K5; 
-    pKeyMap[XK_1] = (uint8_t) Key::K1; pKeyMap[XK_6] = (uint8_t) Key::K6; 
-    pKeyMap[XK_2] = (uint8_t) Key::K2; pKeyMap[XK_7] = (uint8_t) Key::K7; 
-    pKeyMap[XK_3] = (uint8_t) Key::K3; pKeyMap[XK_8] = (uint8_t) Key::K8; 
-    pKeyMap[XK_4] = (uint8_t) Key::K4; pKeyMap[XK_9] = (uint8_t) Key::K9;
-
-    pKeyMap[XK_KP_0] = (uint8_t) Key::NP0; pKeyMap[XK_KP_5] = (uint8_t) Key::NP5; 
-    pKeyMap[XK_KP_1] = (uint8_t) Key::NP1; pKeyMap[XK_KP_6] = (uint8_t) Key::NP6; 
-    pKeyMap[XK_KP_2] = (uint8_t) Key::NP2; pKeyMap[XK_KP_7] = (uint8_t) Key::NP7;
-    pKeyMap[XK_KP_3] = (uint8_t) Key::NP3; pKeyMap[XK_KP_8] = (uint8_t) Key::NP8; 
-    pKeyMap[XK_KP_4] = (uint8_t) Key::NP4; pKeyMap[XK_KP_9] = (uint8_t) Key::NP9;
-    
-    pKeyMap[XK_KP_Multiply] = (uint8_t) Key::NP_MUL; 
-    pKeyMap[XK_KP_Add]      = (uint8_t) Key::NP_ADD; 
-    pKeyMap[XK_KP_Divide]   = (uint8_t) Key::NP_DIV; 
-    pKeyMap[XK_KP_Subtract] = (uint8_t) Key::NP_SUB;
-    pKeyMap[XK_KP_Decimal]  = (uint8_t) Key::NP_DECIMAL;
-
-    return rcode::ok;
-  }
-
     virtual rcode SetWindowTitle(const std::string& s) override {
-    X11::XStoreName(pDisplay, pWindow, s.c_str());
+      X11::XStoreName(pDisplay, pWindow, s.c_str());
       return rcode::ok;
-  }
+    }
 
-    virtual rcode StartSystemEventLoop() override {
-      return rcode::ok;
-  }
-
-    virtual rcode HandleSystemEvent() override { 
+    virtual rcode HandleSystemEvent() override {
       using namespace X11;
 
       XEvent event;
@@ -1779,7 +1789,7 @@ namespace pixel {
 
         } else if (event.type == FocusOut) {
           App->UpdateKeyFocus(false);
-          
+
         } else if (event.type == FocusIn) {
           App->UpdateKeyFocus(true);
 
@@ -1834,8 +1844,8 @@ namespace pixel {
           App->UpdateWindowSize(xce.width, xce.height);
         }
       }
-      
-      return rcode::ok; 
+
+      return rcode::ok;
     }
 
   };

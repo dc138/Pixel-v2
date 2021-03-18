@@ -6,7 +6,7 @@ using namespace pixel;
 int main() {
   Application app({.size = vu2d(500, 500), .name = "Lines",
   .on_launch = [] (Application& app) mutable -> pixel::rcode {
-    app.CreateSprite("samples/test.png"); // This is relative to the directory you run the program from, watch out!
+    app.CreateSprite("samples/test.png");
 
     return pixel::ok;
   },

@@ -4,7 +4,7 @@
 using namespace pixel;
 
 int main() {
-  Application app({.size = vu2d(500, 500), .name = "Lines",
+  Application app({.size = vu2d(500, 500), .name = "Gravitation",
   .on_launch = [] (Application& app) mutable -> pixel::rcode { // This function will be called when the application is created
     return pixel::ok;
   },
