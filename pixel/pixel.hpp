@@ -764,6 +764,10 @@ namespace pixel {
           pKeyboardKeysOld[i] = pKeyboardKeysNew[i];
         }
 
+        for (uint64_t i = 0; i < pScreenSize.prod(); i++) {
+          pBuffer[i] = 0x000000FF;
+        }
+
         if (pOnUpdate) {
           if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
         }
