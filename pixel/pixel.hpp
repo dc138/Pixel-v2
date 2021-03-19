@@ -67,7 +67,7 @@
       );
     }
 
-    if(app.KeyboardKey(Key::ESCAPE).pressed) {
+    if(app.Key(Key::ESCAPE).pressed) {
       app.Close();
     }
 
@@ -164,6 +164,12 @@ namespace pixel {
     BACK, ESCAPE, RETURN, ENTER, PAUSE, SCROLL,
     NP0, NP1, NP2, NP3, NP4, NP5, NP6, NP7, NP8, NP9,
     NP_MUL, NP_DIV, NP_ADD, NP_SUB, NP_DECIMAL, PERIOD
+  };
+
+  enum class Mouse: uint8_t {
+    LEFT = 0,
+    MIDDLE = 1,
+    RIGHT = 2
   };
 
   enum class DrawingMode: uint8_t {
@@ -392,14 +398,14 @@ namespace pixel {
     Application(const Application& other) = delete;
     Application& operator=(const Application& other) = delete;
 
-  public:
+  private:
     callback_t pOnLaunch;
     callback_t pOnUpdate;
     callback_t pOnClose;
 
   private:
-    Platform* platform;
-    Renderer* renderer;
+    Platform* pPlatform;
+    Renderer* pRenderer;
 
   public:
     void Close();
@@ -464,11 +470,8 @@ namespace pixel {
     const vu2d& MousePos() const;
     uint32_t MouseWheel() const;
 
-    const Button& MouseLeft() const;
-    const Button& MouseRight() const;
-    const Button& MouseMiddle() const;
-
-    const Button& KeyboardKey(Key key) const;
+    const Button& Mouse(pixel::Mouse button) const;
+    const Button& Key(Key key) const;
 
     float et() const;
     uint32_t fps() const;
@@ -680,13 +683,13 @@ namespace pixel {
   }
 
   Application::~Application() {
-    delete platform;
-    delete renderer;
+    delete pPlatform;
+    delete pRenderer;
   }
 
   void Application::pEngineThread() {
-    if (platform->ThreadStartUp() == rcode::err) return;
-    if (platform->CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
+    if (pPlatform->ThreadStartUp() == rcode::err) return;
+    if (pPlatform->CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
 
     ConstructFontSheet();
 
@@ -695,8 +698,8 @@ namespace pixel {
       pBuffer[i] = Pixel();
     }
 
-    pBufferId = renderer->CreateTexture(pScreenSize.x, pScreenSize.y);
-    renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+    pBufferId = pRenderer->CreateTexture(pScreenSize.x, pScreenSize.y);
+    pRenderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
 
     pClock1 = std::chrono::system_clock::now();
     pClock2 = std::chrono::system_clock::now();
@@ -715,14 +718,14 @@ namespace pixel {
         pFrameTimer += pElapsedTime;
         pFrameCount++;
 
-        platform->HandleSystemEvent();
+        pPlatform->HandleSystemEvent();
 
         if(pFrameTimer >= 1.0f) {
           pFrameRate = pFrameCount;
           pFrameTimer -= 1.0f;
 
           pWindowTittle = pWindowName + " - FPS: " + std::to_string(pFrameRate);
-          platform->SetWindowTitle(pWindowTittle);
+          pPlatform->SetWindowTitle(pWindowTittle);
 
           pFrameCount = 0;
         }
@@ -772,21 +775,21 @@ namespace pixel {
           if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
         }
 
-        renderer->UpdateViewport(pViewPos, pViewSize);
-        renderer->ClearBuffer(Black, true);
-        renderer->PrepareDrawing();
+        pRenderer->UpdateViewport(pViewPos, pViewSize);
+        pRenderer->ClearBuffer(Black, true);
+        pRenderer->PrepareDrawing();
 
-        renderer->ApplyTexture(pBufferId);
-        renderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
-        renderer->DrawLayerQuad();
+        pRenderer->ApplyTexture(pBufferId);
+        pRenderer->UpdateTexture(pBufferId, pScreenSize.x, pScreenSize.y, pBuffer);
+        pRenderer->DrawLayerQuad();
 
         for (auto& s : pSpritesPending) {
-          renderer->ApplyTexture(s->pBufferId);
-          renderer->DrawDecalQuad(*s);
+          pRenderer->ApplyTexture(s->pBufferId);
+          pRenderer->DrawDecalQuad(*s);
         }
 
         pSpritesPending.clear();
-        renderer->DisplayFrame();
+        pRenderer->DisplayFrame();
       }
 
       if (pOnClose) {
@@ -795,14 +798,14 @@ namespace pixel {
     }
 
     delete[] pBuffer;
-    renderer->DeleteTexture(pBufferId);
+    pRenderer->DeleteTexture(pBufferId);
 
     for (auto& s : pSprites) {
-      if (s.pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(s.pBufferId);
+      if (s.pBufferId != 0xFFFFFFFF) pRenderer->DeleteTexture(s.pBufferId);
     }
 
-    platform->ThreadCleanUp();
-    platform->ApplicationCleanUp();
+    pPlatform->ThreadCleanUp();
+    pPlatform->ApplicationCleanUp();
 
     pHasBeenClosed = true;
   }
@@ -810,8 +813,8 @@ namespace pixel {
   rcode Application::Launch(bool background) {
     if (pHasBeenClosed) return rcode::abort;
 
-    if (platform->ApplicationStartUp() != rcode::ok) return rcode::err;
-    if (platform->CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
+    if (pPlatform->ApplicationStartUp() != rcode::ok) return rcode::err;
+    if (pPlatform->CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
 
     UpdateViewport();
 
@@ -861,11 +864,11 @@ namespace pixel {
   void Application::UpdateSprite(uint32_t id) {
     Sprite& s = pSprites.at(id);
 
-    if (s.pBufferId != 0xFFFFFFFF) renderer->DeleteTexture(s.pBufferId);
+    if (s.pBufferId != 0xFFFFFFFF) pRenderer->DeleteTexture(s.pBufferId);
 
-    s.pBufferId = renderer->CreateTexture(s.pSize.x, s.pSize.y);
-    renderer->ApplyTexture(s.pBufferId);
-    renderer->UpdateTexture(s.pBufferId, &s);
+    s.pBufferId = pRenderer->CreateTexture(s.pSize.x, s.pSize.y);
+    pRenderer->ApplyTexture(s.pBufferId);
+    pRenderer->UpdateTexture(s.pBufferId, &s);
   }
 
   void Application::Draw(const vu2d& pos, const Pixel& pixel) {
@@ -1318,19 +1321,11 @@ namespace pixel {
     return pMouseWheel;
   }
 
-  const Button& Application::MouseLeft() const {
-    return pMouseButtons[0];
+  const Button& Application::Mouse(pixel::Mouse button) const {
+    return pMouseButtons[(uint8_t)button];
   }
 
-  const Button& Application::MouseRight() const {
-    return pMouseButtons[1];
-  }
-
-  const Button& Application::MouseMiddle() const {
-    return pMouseButtons[2];
-  }
-
-  const Button& Application::KeyboardKey(Key key) const {
+  const Button& Application::Key(pixel::Key key) const {
     return pKeyboardKeys[(uint8_t)key];
   }
 
@@ -1654,13 +1649,13 @@ namespace pixel {
     }
 
     virtual rcode ThreadCleanUp() override {
-      App->renderer->DestroyDevice();
+      App->pRenderer->DestroyDevice();
       return rcode::ok;
     }
 
     virtual rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) override {
-      if(App->renderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
-        App->renderer->UpdateViewport(viewpos, viewsize);
+      if(App->pRenderer->CreateDevice({pDisplay, &pWindow, pVisualInfo}, fullscreen, vsync) == rcode::ok) {
+        App->pRenderer->UpdateViewport(viewpos, viewsize);
         return rcode::ok;
 
       } else {
@@ -1806,8 +1801,8 @@ namespace pixel {
           case 5:	App->UpdateMouseWheel(-100); break;
 
           case 1:	App->UpdateMouseState(0, true); break;
-          case 2:	App->UpdateMouseState(2, true); break;
-          case 3:	App->UpdateMouseState(1, true); break;
+          case 2:	App->UpdateMouseState(1, true); break;
+          case 3:	App->UpdateMouseState(2, true); break;
 
           default: break;
           }
@@ -1881,11 +1876,11 @@ namespace pixel {
 #   endif
 
 #   ifdef PIXEL_USE_OPENGL
-      renderer = new Renderer_OpenGL;
+      pRenderer = new Renderer_OpenGL;
 #   endif
 
 #   ifdef PIXEL_LINUX
-      platform = new Platform_Linux;
+      pPlatform = new Platform_Linux;
       if (!helper) helper = new Helper_Linux;
 #   endif
 
@@ -1899,7 +1894,7 @@ namespace pixel {
       helper = std::make_unique<Helper_MacOS>();
 #   endif
 
-    platform->App = this;
-    renderer->App = this;
+    pPlatform->App = this;
+    pRenderer->App = this;
   }
 }

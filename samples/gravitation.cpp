@@ -34,10 +34,8 @@ int main() {
 		f = (g * m1 * m2) / (r * r);
 		t = atan(d.y / d.x);
 
-		f1.x = f * cos(t) * (p2.x >= p1.x ? 1 : -1);
-		f1.y = f * sin(t) * (p2.x >= p1.x ? 1 : -1);
-		f2.x = f * cos(t) * (p2.x >= p1.x ? -1 : 1);
-		f2.y = f * sin(t) * (p2.x >= p1.x ? -1 : 1);
+    f1 = vf2d(cos(t), sin(t)) * f * (p2.x >= p1.x ? 1 : -1);
+    f2 = vf2d(cos(t), sin(t)) * f * (p2.x >= p1.x ? -1 : 1);
 
     a1 = f1 / m1;
     a2 = f2 / m2;
@@ -57,7 +55,7 @@ int main() {
 		app.DrawLine(p1, p1 + a1, Blue);
 		app.DrawLine(p2, p2 + a2, Blue);
 
-    if (app.KeyboardKey(Key::ESCAPE).pressed) app.Close();
+    if (app.Mouse(Mouse::LEFT).released) return pixel::abort;
     return pixel::ok;
   }});
 

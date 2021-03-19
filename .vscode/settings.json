@@ -71,6 +71,7 @@
         "*.rh": "cpp",
         "filesystem": "cpp",
         "any": "cpp",
-        "codecvt": "cpp"
+        "codecvt": "cpp",
+        "*.inc": "cpp"
     }
 }

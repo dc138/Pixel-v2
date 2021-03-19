@@ -17,7 +17,7 @@ int main() {
       );
     }
 
-    if(app.KeyboardKey(Key::ESCAPE).pressed) {
+    if(app.Key(Key::ESCAPE).pressed) {
 			app.Close();
 		}
 

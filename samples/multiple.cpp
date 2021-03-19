@@ -14,7 +14,7 @@ int main() {
       );
     }
 
-    if (app.KeyboardKey(Key::ESCAPE).pressed) app.Close();
+    if (app.Key(Key::ESCAPE).pressed) app.Close();
 
     return pixel::ok;
   }});
@@ -29,7 +29,7 @@ int main() {
       );
     }
 
-    if (app.KeyboardKey(Key::ESCAPE).pressed) app.Close();
+    if (app.Key(Key::ESCAPE).pressed) app.Close();
 
     return pixel::ok;
   }});

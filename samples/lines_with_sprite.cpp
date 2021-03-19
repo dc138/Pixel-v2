@@ -21,7 +21,7 @@ int main() {
 
     app.DrawSprite(app.MousePos(), 0);
 
-    if(app.KeyboardKey(Key::ESCAPE).pressed) {
+    if(app.Key(Key::ESCAPE).pressed || app.Mouse(Mouse::LEFT).released) {
 			app.Close();
 		}
 
