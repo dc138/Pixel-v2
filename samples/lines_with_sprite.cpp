@@ -4,7 +4,7 @@
 using namespace pixel;
 
 int main() {
-  Application app({.size = vu2d(500, 500), .name = "Lines",
+  Application app({.size = vu2d(500, 500), .name = "Lines", .clearbuffer = false,
   .on_launch = [] (Application& app) mutable -> pixel::rcode {
     app.CreateSprite("samples/test.png");
 
@@ -13,7 +13,7 @@ int main() {
   .on_update = [] (Application& app) mutable -> pixel::rcode {
     for (uint8_t i = 0; i < 50; i++) {
       app.DrawLine(
-        vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
+				vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
 				vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
 				RandPixel()
       );
@@ -21,7 +21,7 @@ int main() {
 
     app.DrawSprite(app.MousePos(), 0);
 
-    if(app.Key(Key::ESCAPE).pressed || app.Mouse(Mouse::LEFT).released) {
+    if(app.Key(Key::ESCAPE).pressed) {
 			app.Close();
 		}
 

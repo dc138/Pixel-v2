@@ -55,7 +55,7 @@ int main() {
 		app.DrawLine(p1, p1 + a1, Blue);
 		app.DrawLine(p2, p2 + a2, Blue);
 
-    if (app.Mouse(Mouse::LEFT).released) return pixel::abort;
+    if (app.Key(Key::ESCAPE).pressed) return pixel::abort;
     return pixel::ok;
   }});
 
