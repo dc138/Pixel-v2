@@ -19,15 +19,13 @@ int main() {
       );
     }
 
-    app.DrawSprite(app.MousePos(), 0);
+    app.DrawPartialSprite(app.MousePos(), vu2d(16, 16), vu2d(16, 16), 0);
+    //app.DrawSprite(app.MousePos(), 0);
 
     if(app.Key(Key::ESCAPE).pressed) {
 			app.Close();
 		}
 
-    return pixel::ok;
-  },
-  .on_close = [] (Application& app) mutable -> pixel::rcode {
     return pixel::ok;
   }});
 

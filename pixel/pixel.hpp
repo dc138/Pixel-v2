@@ -472,8 +472,8 @@ namespace pixel {
     void DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
     void FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
 
-    void DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
-    void DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+    void DrawSprite(const vu2d& pos, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+    void DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
 
     void DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White);
     void DrawPartialWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White);
@@ -1236,17 +1236,17 @@ namespace pixel {
     }
   }
 
-  void Application::DrawSprite(const vf2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
+  void Application::DrawSprite(const vu2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
     Sprite& spr = pSprites.at(sprite);
 
     vf2d newpos = {
-      (pos.x * pInvScreenSize.x) * 2.0f - 1.0f,
-      ((pos.y * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
+      (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
+      ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
     };
 
     vf2d newsize = {
-      newpos.x + (2.0f * (float(spr.pSize.x) * pInvScreenSize.x)) * scale.x,
-      newpos.y - (2.0f * (float(spr.pSize.y) * pInvScreenSize.y)) * scale.y
+      newpos.x + (2.0f * float(spr.pSize.x) * pInvScreenSize.x) * scale.x,
+      newpos.y - (2.0f * float(spr.pSize.y) * pInvScreenSize.y) * scale.y
     };
 
     spr.pTint = tint;
@@ -1259,25 +1259,52 @@ namespace pixel {
     pSpritesPending.push_back(&spr);
   }
 
-  /*void Application::DrawPartialSprite(const vf2d& pos, const vf2d& spos, const vf2d& ssize, Sprite* sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
-    //! STUB: Implement function.
+  void Application::DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
+    Sprite& spr = pSprites.at(sprite);
+
+    vf2d newpos = {
+      (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
+      ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
+    };
+
+    vf2d newsize = {
+      newpos.x + (2.0f * (float) ssize.x * pInvScreenSize.x) * scale.x,
+      newpos.y - (2.0f * (float) ssize.y * pInvScreenSize.y) * scale.y
+    };
+
+    spr.pTint = tint;
+
+    spr.pPos[0] = { newpos.x, newpos.y };
+    spr.pPos[1] = { newpos.x, newsize.y };
+    spr.pPos[2] = { newsize.x, newsize.y };
+    spr.pPos[3] = { newsize.x, newpos.y };
+
+    vf2d uvtl = (vf2d) spos / (vf2d) spr.pSize * spr.pUvScale;
+    vf2d uvbr = uvtl + ((vf2d) ssize / (vf2d) spr.pSize * spr.pUvScale);
+
+    spr.pUv[0] = {uvtl.x, uvtl.y };
+    spr.pUv[1] = {uvtl.x, uvbr.y };
+    spr.pUv[2] = {uvbr.x, uvbr.y };
+    spr.pUv[3] = {uvbr.x, uvtl.y };
+
+    pSpritesPending.push_back(&spr);
   }
 
-  void Application::DrawWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White) {
-    //! STUB: Implement function.
-  }
+  // void Application::DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White) {
+  //   //! STUB: Implement function.
+  // }
 
-  void Application::DrawPartialWarpedSprite(Sprite* sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White) {
-    //! STUB: Implement function.
-  }
+  // void Application::DrawPartialWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White) {
+  //   //! STUB: Implement function.
+  // }
 
-  void Application::DrawRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
-    //! STUB: Implement function.
-  }
+  // void Application::DrawRotatedSprite(const vf2d& pos, uint8_t sprite, float alpha, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+  //   //! STUB: Implement function.
+  // }
 
-  void Application::DrawPartialRotatedSprite(const vf2d& pos, Sprite* sprite, float alpha, const vf2d& spos, const vf2d& ssize, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
-    //! STUB: Implement function.
-  }*/
+  // void Application::DrawPartialRotatedSprite(const vf2d& pos, uint8_t sprite, float alpha, const vf2d& spos, const vf2d& ssize, const vf2d& center = vf2d(0.0f, 0.0f), const vf2d scale = vf2d(1.0f, 1.0f), const Pixel& tint = White) {
+  //   //! STUB: Implement function.
+  // }
 
   void Application::UpdateMouse(uint32_t x, uint32_t y) {
     pHasMouseFocus = true;
