@@ -120,7 +120,7 @@
 #endif
 
 #define PIXEL_VERSION_MAJOR 2
-#define PIXEL_VERSION_MINOR 2
+#define PIXEL_VERSION_MINOR 3
 #define PIXEL_VERSION_PATCH 0
 
 #define IGNORE(x) (void(x))
@@ -134,6 +134,8 @@
 #include <thread>
 #include <filesystem>
 #include <cmath>
+#include <type_traits>
+#include <utility>
 
 /*
 ___________________________
@@ -166,7 +168,7 @@ ___________________________
 #endif /* PIXEL_USE_OPENGL */
 
 namespace pixel {
-  enum rcode { ok = 0, err = 1, file_err = 2, abort = 3 };
+  enum rcode { ok = 0, err = 1, file_err = 2, abort = 3, quit = 4 };
   class Application;
   class Sprite;
 
@@ -423,8 +425,8 @@ namespace pixel {
 
       bool fullscreen = false;
       bool vsync = false;
-      bool clearbuffer = true;
-      Pixel buffercolor = Black;
+      bool clear_buffer = true;
+      Pixel buffer_color = Black;
 
       callback_t on_launch = nullptr;
       callback_t on_update = nullptr;
@@ -723,8 +725,8 @@ namespace pixel {
 
     pVsync = params.vsync;
     pFullScreen = params.fullscreen;
-    pClearBuffer = params.clearbuffer;
-    pBufferColor = params.buffercolor;
+    pClearBuffer = params.clear_buffer;
+    pBufferColor = params.buffer_color;
 
     pOnLaunch = params.on_launch;
     pOnUpdate = params.on_update;
@@ -1408,6 +1410,53 @@ namespace pixel {
   uint32_t Application::fps() const {
     return pFrameRate;
   }
+
+  namespace {
+    template<typename _Call>
+    union storage {
+        storage() {}
+        std::decay_t<_Call> callable;
+    };
+  
+    template<typename _Call, typename _Ret, typename... _Args>
+    auto fun(_Call&& c, _Ret (*)(_Args...)){
+      static bool used = false;
+      static storage<_Call> s;
+      using type = decltype(s.callable);
+
+      if(used) {
+          s.callable.~type();
+      }
+
+      new (&s.callable) type(std::forward<_Call>(c));
+      used = true;
+
+      return [](_Args... args) -> _Ret {
+          return _Ret(s.callable(std::forward<_Args>(args)...));
+      };
+    }
+  }
+
+  // A very hackish way of allowing the user to pass an inline declared capturing lambda in the Application constructor
+  template<typename Fn = rcode(Application&), typename _Call>
+  Fn* fn(_Call&& c) {
+      return fun(std::forward<_Call>(c), (Fn*)nullptr);
+  }
+
+  // Even easier with this macros!
+# define callback_c(lambda_body) fn([&](Application& app) lambda_body)
+# define callback  (lambda_body) fn([ ](Application& app) lambda_body)
+
+  /*
+  
+    ···
+    .on_update = callback({
+      return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
+    })
+    ···
+  
+  */
+
 }
 
 /*
@@ -1417,8 +1466,6 @@ ____________________________
 ____________________________
 
 */
-
-
 
 namespace pixel {  
   rcode Renderer::CreateDevice(std::vector<void*> params, bool fullscreen, bool vsync) {
