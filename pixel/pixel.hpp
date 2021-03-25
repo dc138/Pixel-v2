@@ -1445,7 +1445,7 @@ namespace pixel {
 
   // Even easier with this macros!
 # define callback_c(lambda_body) fn([&](Application& app) lambda_body)
-# define callback  (lambda_body) fn([ ](Application& app) lambda_body)
+# define callback(lambda_body) fn([](Application& app) lambda_body)
 
   /*
   
