@@ -97,7 +97,7 @@ int main() {
   std::vector<Trace> traces;
   
   Application app({
-    .size = vu2d(500, 500),
+    .size = vu2d(512, 512),
     .name = "Gravitation",
     .on_update = fn([&](Application& app) {
       sys.Update(app.et());

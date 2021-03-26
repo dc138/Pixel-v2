@@ -456,11 +456,7 @@ namespace pixel {
     void SetDrawingMode(pixel::DrawingMode mode);
 
   public:
-    void CreateSprite(const std::string& filename);
-    void CreateSprite(uint32_t w, uint32_t h);
-
-    Sprite* GetSprite(uint32_t id);
-    void UpdateSprite(uint32_t id);
+    void RegisterSprite(Sprite* spr);
 
   public:
     void Draw(const vu2d& pos, const Pixel& pixel);
@@ -475,8 +471,8 @@ namespace pixel {
     void DrawTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
     void FillTriangle(const vu2d& pos1, const vu2d& pos2, const vu2d& pos3, const Pixel& pixel);
 
-    void DrawSprite(const vu2d& pos, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
-    void DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, uint8_t sprite, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+    void DrawSprite(const vu2d& pos, Sprite* spr, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
+    void DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, Sprite* spr, const vf2d& scale = vf2d(1.0f, 1.0f), const Pixel& tint = White);
 
     void DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White);
     void DrawPartialWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& post, const vf2d& spos, const vf2d& ssize, const Pixel& tint = White);
@@ -490,7 +486,6 @@ namespace pixel {
     void UpdateWindowSize(uint32_t x, uint32_t y);
 
     void UpdateViewport();
-    void ConstructFontSheet();
 
     void UpdateMouseState(uint32_t button, bool state);
     void UpdateKeyState(uint32_t key, bool state);
@@ -572,9 +567,11 @@ namespace pixel {
     Pixel* pBuffer = nullptr;
     uint32_t pBufferId = 0xFFFFFFFF;
 
-    std::vector<Sprite> pSprites;
     std::vector<Sprite*> pSpritesPending;
     pixel::DrawingMode pDrawingMode = pixel::DrawingMode::NO_ALPHA;
+
+  public:
+    Sprite* pFontSprite;
 
   private:
     callback_t pOnLaunch;
@@ -587,6 +584,7 @@ namespace pixel {
   private:
     void pStartThread();
     void pEngineThread();
+    void pCreateFont();
     void pConfigureSystem();
   };
 }
@@ -733,9 +731,13 @@ namespace pixel {
     pOnLaunch = params.on_launch;
     pOnUpdate = params.on_update;
     pOnClose = params.on_close;
+
+    pCreateFont();
   }
 
-  Application::~Application() {}
+  Application::~Application() {
+    delete pFontSprite;
+  }
 
   void Application::pStartThread() {
     if (pPlatform.ApplicationStartUp() != rcode::ok) return;
@@ -756,7 +758,7 @@ namespace pixel {
     if (pPlatform.ThreadStartUp() == rcode::err) return;
     if (pPlatform.CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
 
-    ConstructFontSheet();
+    RegisterSprite(pFontSprite);
 
     pBuffer = new Pixel[pScreenSize.prod()];
     for (uint32_t i = 0; i < pScreenSize.prod(); i++) {
@@ -867,10 +869,6 @@ namespace pixel {
     delete[] pBuffer;
     pRenderer.DeleteTexture(pBufferId);
 
-    for (auto& s : pSprites) {
-      if (s.pBufferId != 0xFFFFFFFF) pRenderer.DeleteTexture(s.pBufferId);
-    }
-
     pPlatform.ThreadCleanUp();
     pPlatform.ApplicationCleanUp();
   }
@@ -890,6 +888,168 @@ namespace pixel {
     return rcode::ok;
   }
 
+  void Application::pCreateFont() {
+    std::string font_base64;
+
+    // Base64 encoded 1805x32 monochromatic ascii font sheet. Using "Source Code Pro 32" as font
+
+    font_base64 += "AAAAAAAAAAAAAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAcAAAAAAAAAAAAAAAAAAAAAAMAAAAAAAAAAAABCAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4D9wAID/AA";
+    font_base64 += "AAAAAAOAAAAMABAAAAAIABAAAA/AAAAAcAABwA4AAOAPgPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAwAA6AAQAAAAAAAOAA8HAAAACAAQAAAAAAgAMAwAEOAAAAAAAAAAAAAAAAAABwAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4A8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPwHDADwHwAAAAAAAA4AAAA4AAAAAAAwAAAA4D8AAO";
+    font_base64 += "AAAMADAB7AAQD/AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwB8AB8AcAAAAAAAAcAB4Og";
+    font_base64 += "GEAMAAeAIAPAHAAAByAAwAAAAAAAAAAAAAAAAAABsAHADgA+AHADwDAAfw/AH7A/x/ADwA/AAAAAAAAAAAA";
+    font_base64 += "AAAAAP8DAAAAHAD/AwA/wH8A/H/g/wPwAwzg4P8D/h84wIEDAA94cIAD+AD8DwA+AP8DgB/w/x8GcBgAdwB";
+    font_base64 += "wDuA4AA7/P4ABgAEAAAMADgAAAIADAAAABwAAAAAABgAAABwEAAAcAAB4AMADOAAAOAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAwAAAAAAAAAAAAAAAAAAAAABgA4AMABAAAAAACAA8DDATAMgB/gDxj4AwAOAMAB4AAAAAAAAAAAA";
+    font_base64 += "AAAAAAA4AD+A/gHwP8A/gcAPID/B/A/+P8D/gPwDwAAAAAAAIAAAAACAODwAPADgAfg/wH4H/g/gP8P/H+A";
+    font_base64 += "/4EBHPx/wP8DBzxwAOABDw5wwH+A/wfwH+D/AfwP/v/DAA4HYBwAjgMODuDg/wcwAHAAAGAAwAMAAADgAAA";
+    font_base64 += "A4AAAAAAAwAAAAMABAACAAwAADgBwAAcAAAcAAAAAAAAAAAAAAAAAAAAAAIABAAAAAAAAAAAAAAAAAAAA4A";
+    font_base64 += "AABwAwAAAAAAAAcAB4OACGAPwPhoGDYwDAAQAYADgAAAAAAAAAAAAAAAAAAAzg8QD/ADwc4OEBgAcwAAAfB";
+    font_base64 += "wAw4OAAhwcAAAAAAAAYAADAAQAAHID/ANgAHHyAjweDDzAAgAMA+HwwgANwAABw4IADDgA84MEDDnwecOAB";
+    font_base64 += "nwcceMDnA+AAGMDhAI4DwGHAwQEcAGAABgAMAAAMAGwAAAAACAAAABwAAAAAABgAAAAYAAAAcAAAAAAAAOA";
+    font_base64 += "AAOAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAwA4AAABgAAAAAAAA4ADwdAEMDDw2A4MA";
+    font_base64 += "wAOACAAQAGACAAAAMAAAAAAAAAAIABHBgAHIABBwxwANgABgBwAAAABww4cOAAAAAAAADAAwAAeAAAAAM4O";
+    font_base64 += "AAbgAMOeEBgwAMGAHAAgAMEBnAADgAADhw4wAGADT54wMEDBw5w8MCBAxw8YAAcAAM4HMBxABgcHHCAAQAO";
+    font_base64 += "wACAAwCAAYANAAAAAAAAAIADAAAAAAADAAAAAwAAAA4AAAAAAAAcAAAcAAAAAAAAAAAAAAAAAAAAAAAABgA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAIABABwAwAAAAAAAAMAB4OAACAM4IBgMA4YDAAcAOADAAQAEAGAAAAAAAAAAAAA4wA";
+    font_base64 += "EHgAMAwAAADoAbwAAADgAAcMABBgc4AA4AAAAAHAAAADwAAGCAAwxgB3DAgQcADHDAAAAOADgAwAAOwAEAw";
+    font_base64 += "IGDAzgAsMEGHzg44MABDg44cICDAwCAA2AABwcYDoADhwEMOADgABgAYAAAMAA4AwAAAAAAAABwAAAAAABg";
+    font_base64 += "AAAAYAAAAMABAAAAAACAAwCAAwAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAwAIADABgAAAA";
+    font_base64 += "AAAA4ABgcgGEAAwCDMcAwAOAAAAMAMACAAAAMAAAAAAAAAAAAAxjAAHAAADgAwAE4AxgA4AAAAAY4wOAABu";
+    font_base64 += "ADAB4A4AEAAAAPAAAOOIAB7gAOMHAAgAEcGADAAQAHABjAATgAADhwOAAHAD7YYAOHAzg4gOEADg5wcAAAc";
+    font_base64 += "AAM4OCAw+Fw4DiAAwMADAADAAwAAAYAYwAAAAAAAPwAzgcAfgB8DMAP4P8H8H84PsD/AP4HcIADcADmcGD4";
+    font_base64 += "APABGB8APgYYfoA/wP8fDmAwAOYA4DjAYAAM/n8ADgBwAAADAAAAAAAABwCDA/5/YABgMAMYBwAcAGAAAA4";
+    font_base64 += "AMACAAQAAAAAAAAAAYAADOAAOAAAHADiAYwADABwAAGAABhgcwAB8AOADAA6A/w+ABwDAAAMwwBjAAQYGAD";
+    font_base64 += "CAAwMAOABwAAADOAAHAAAHjgPgAMCPH+zgcAAHBzAcwMEBDg4AAA6AARwccDgcDjgDYHAAwAFgAIADAMAAY";
+    font_base64 += "BwAAAAAAOB/wP0D8D/AvwH+B/z/gP8P8w/4H8D/AA44AA7Avh/MP4D/APMP4N8A4w/4H/j/wwEMDuAYHBwG";
+    font_base64 += "HByAwf8PwAEADgBgAAAAAAAAwABgMMD/DxwADCMAdwCAAwAOAMABCIYAMAAAAAAAAAAAAA5wAAfAAQBgAIA";
+    font_base64 += "DMAxgAIABAAAOwIGDAziADwB8APAA8P8B4AEAHHAABBgHOODgAAAGYGAAAAcADgBgAAfgAADgwHkAHAC4sY";
+    font_base64 += "MZHA7A4ACGAzA4wIEDAMABMIADAwaHxwF3ABwGABwADABgAAAYAAYDAAAAAAAfDvjxAB8PPD7g4QEwADgcY";
+    font_base64 += "McDgAMAHMCBA8ABeL6HHQ94PODHAx4fYJ+BgwdgADiAgQEcg4PBwQEDOADgADgAwAEADAAAAAAAABgADAbA";
+    font_base64 += "MAAPAGMAwAcAYADAAAAwAM8eAAYAAAAAAAAAAMAAjuMAOAAADgA8AIcB7AcwPgDAAHA4cAAH4AGADwAHAAA";
+    font_base64 += "AAHAAwAEGgIDjAAcPHADAABwMAOAAwAEADOAAHAAAHDgHgAMAN3Ywh8MAOBzgMAAOBzjwAQA4AAZw4MDA8D";
+    font_base64 += "jABwDjAIABgAEADAAAA8BgAAAAAABAgAMPHHCAwAEHHjAABgADBzxwAHAAgAM4OAA4AMfj8MCBAw48cOCAA";
+    font_base64 += "2wAOEAADAAHMHCA4fAwcBjgAAMADgAHADgAgAHAAQEAAAADgMEAGAbAB+AHAHgAAAwAGAAABsD/Af8fAADA";
+    font_base64 += "/wcAAAAcwHEcAAcAwAH4A3AwgP8D9x8AHAD8AwzwAAAA4ABwAAAAAAAcABzAgB8wGOB/gAMAGICD/wP8Pxg";
+    font_base64 += "AgP8fgAMAgAP3AXAA4OwOxnAYAIcDHAbA4cAD/AEAB8AADhwcGBsD8ADgDAA4ADAAgAMAYAAcHAAAAAAAAG";
+    font_base64 += "DgAAcHADjAwAEOwABwwIADHAAOAHAAhwMAB+AwHA5wcICDAxwcYIAHAAcAgAHgAAYOOBwaBowDGHAA4ADgA";
+    font_base64 += "AAHADAA/DAAAABgAAAAAEMA8AMgQIAHGAAAAAMAwADAD+D/AwAA+P8AAACAATieA+AAABwAfwAHBjDw4AcH";
+    font_base64 += "gAOAP4CHHwAAAAAADgAAAAAAA8ABGHwDBgf8P3AAAANw8H+A/wcDf/D/A3AAAHDgdwAOAJzNwTgOA+Bw4ME";
+    font_base64 += "AOPw/AP4A4AAYwAGDAWdjAA4A2AGAAwAGAGAAAAyAAQMAAAAAAAAMHODgAIADGBiAARgADhhwgAPAAQAO4D";
+    font_base64 += "gA4AAMhsMBDgdwcIDDAQxwAOABADAAHMCAAYNj44A7AAcGAA4ADADgAAAOwDgGAAAADAAAACAIAPABAD/4g";
+    font_base64 += "QMAAGAAADgA8AAAAwAAAAAAAAAAMADHcQAcAMABADxgwAAAHDzAATAAHB/gvwMAAAAAwAMAAAAAeAAYAMNh";
+    font_base64 += "4OCAAw4OAGAADgYAcADg4A8GcAAOAAAOfA7AAYCzORjGYQAc/h8YAIf/AwB+ABwAAzjgMODsDOADAB8AOAD";
+    font_base64 += "AAAAcAIABMGAAAAAAAAD4gQMcDABwAIMDMAADwAEDDnAAOADAAZwDAByAwXA4wOEADg5wOIABBgD4AAAGgA";
+    font_base64 += "MYcHBgbBzgA+DAAOAA+AAAHACADxh+AAAAgAEAAID/DwB4ADGOczAAAAAMAAAHABsAYAAAAAAAAAAAAAfgA";
+    font_base64 += "A6AAwA4AAAODhgAAIMDOAAHwIEH8HEAAAAAAOABAAAAgAMAA2AcDBwYcIDDAQAMwMEAAA4AHIDBAA7AAQDA";
+    font_base64 += "gYcDOABwHAfDOQyAw/8AA+BwOAAAD4ADYAAHHAecnQFsAMABAAcAGAAAAwAwAAAAAAAAAADwP3AAgwEADmD";
+    font_base64 += "w/wdgADBwwAEOAAcAOID7AIADMBgOBzgcgMEBDAcwwAAA/gHAAHAAAwwOjI0BOAAYHAAOAB8AgAMA4AEABw";
+    font_base64 += "AAAAAAAADw/wEADjCGMRwHAACAAQBgAHAGAAwAAAAAAAAAAGAAHMABcACAAwCA4f8fAOBgAAfgABjAAQAGA";
+    font_base64 += "AAAAAB4APx/ADwAAACMgYH/Bw5gOACAARgYAMABgAMwGMABOAAAOPBwAAcAjuNgMIcDMDgA4AAMDgcAgANw";
+    font_base64 += "AAzgAOOAOzvAHQA4AHAAAAMAYAAABgAAAAAAAACADwYOYDAAwAEM/v8ADAAOBzjAAeAAAAfwOwBwAAbD4QC";
+    font_base64 += "HAzA4gOEABhgAAP4AGAAOYIDDgLMzgA8AhwHgAQAHAHAAAAcAAAAAAAAAAAAAGAYAgAFHMAdnAAAAMAAADA";
+    font_base64 += "DGAYABAAAAAAAAAAAOAAMYAA4AOAAAMPz/AwAcDMAAHIADOADAAAAAAAAAPID/D8ABAACAMTD4/8ABDA4AM";
+    font_base64 += "IADAwA4AHAABgM4AAcAAAcOHOAAwHEcDO5wAAcHABzAwcEBAHAADoABHGAMYGMHHAcABwAHAGAAABwAwAAA";
+    font_base64 += "AAAAAAAAOMDAAQ4GADiAwQEAgAGAfwAHOAAcAOAAPg4ADsBgOBzgcAAHBzgcwAADAAA8AAPAAQxgHHBnBrA";
+    font_base64 += "BwDAAHADAAAAOAGAAAAAAAAAAAAAAAMMAADBwDObADwAAAAYAgAFgMAAwAAAAAAAAAADAAGAAA8ABgAMAAA";
+    font_base64 += "4ADACAgwMcgAFwAAcAHAAAAAAAAA8AAAAeAAAAMA4HBxg4gMEBAAZwYAAABwAcwGAAB+AAAODAgQMcADiAg";
+    font_base64 += "4EdDuDgAIADODg4AAAOwAFwgAGcAWz8gOMA4ADgAAAMAAADABgAAAAAAAAAAAMYOMDBAQAHMDgAADAA2APg";
+    font_base64 += "AAeAAwAcwIMBwAEYDIcDHA7g4ACHAxhgAAAADmAAOIABjAFu7AB3ADgHwAEAOADAAQAMAAAAAAAAHAAAAGA";
+    font_base64 += "YwAAHh8Ec8AAAAMAAADAABAQABgA4AAAAAB4AGAAccAA4ADgAAMAAgAEAOHCAAzAADuAAgAHgAQAHAIAHAA";
+    font_base64 += "DgAABwAIa/YAAHBzh4AMAABwwA4ACAAxgM4AAcAAIMOOCAAwAHcDDwgwMOHADgAAMHDgjAATgADjgAO4CND";
+    font_base64 += "zg4ABwADgCAAQBgAAADAAAAAAAAAGAAAwc4OADgAAYOAAAGgAMAHOAAcACAAzhwADgAg+FwgIMBHBzgcAAD";
+    font_base64 += "DAAAwAEMAAY4gDOAjR1wHABmABwAAAcAOACAAQAAAAAAwAcAAAAMA3jwYGAYBz4AAAA4AAAHAAAAAACADwA";
+    font_base64 += "AAOADgAMABwYAB8ADgAMcADBgAAccOAAHgAEcADgAPgDwAQDgAAAADgAAD8DgEQ7g4AAHHjAY8IABABwA4A";
+    font_base64 += "CDARyAA+DAAQc4cADgAA4GfPDAgQMAHHDggAMHOAAHwAMHYAPw4QEDBoAD4AAAMAAAHABgAAAAAAAAAAAMc";
+    font_base64 += "OCAAw4QOODAAwDAAHAAgAMcAA4AcAAHHAAHYDAcDnBwwIEDDhxwgAEAATiAA8CBB2AHsPEBBgfADsABAOAA";
+    font_base64 += "AAcAMAAAAAAAAPgAAACAYQD+DwYM4+EfAAAABgDgAAAAAAAA8AEAAAB8ADAA4PEA4AA8APDhAQAGPHgAhwf";
+    font_base64 += "gAPDggcMDwAcAPgAAEAAAQAAA4AEYAMABGBx4gI8Hgw8wAIADAHx8MIADcAA8PuAABw4AHMDBgA88HnAAAI";
+    font_base64 += "8HHHDg4wPgAPB5AHwAHjxwwAFwAAwAAAYAAAMADAAAAAAAAACAhw98PICHBx8f8OAAGAAeAHCAA8ABAA7gA";
+    font_base64 += "AfgIQyGwwEOPB7w8YCPDzAA8IED8CB43AB8ADY84OAA8AAcAAAcAOAAAAYAAAAAAAAfAAAAEAQAf4AAP/iP";
+    font_base64 += "AwAAwAAADAAAAAAAAH4AAACADwAGAPgP8P/D/x/4HwDAAP8HwH8AHAD8H/A/APgAwA8AAAAAAAAAADwABgA";
+    font_base64 += "YAIf/B+B/4P8A/j9wAAD+BwZw8P8B/wMcwMH/hwM4GOAB/wEOAMB/gAMc+D8AHAD8BwAPwIMHBnAADsD/H8";
+    font_base64 += "AAAOAAgAEAAAAAAAAA4L+B/QPgf8B/A/wfAAOA/wcOcAA4AMABHOAA+IfBcDjAAf8B/g/gvwEGAPg/APwH/";
+    font_base64 += "hkAD8CDBw44AB7A/x+AAQAcAMAAAAAAAADAAQAAAIIAAAMAwAN8YAAAADgAwAEAAAAAAIAPAAAA4ADgAAB8";
+    font_base64 += "AP5/+P8D/AAAGAA/AOADgAMA/gD4AQAOAPABAAAAAAAAAAAHwACAA+DwPwDwA/wHwP8HDgAAP8AADv4/gB+";
+    font_base64 += "AAzj4/3AABwM8gA/AAQDgB3CAA/wBgAMAfgDgAHjw4AAOwAH4/wMYAAAYADAAAAAAAAAAAPgxMD4A8APgYw";
+    font_base64 += "D+AGAA4P/DAQ4ABwA4gAM4AHwwGA4HOIAPwPkA8DHAAAD8AQB+gA8D4ABw8OAADsAD+P8DMACAAwAYAAAAA";
+    font_base64 += "AAAAAAAAAAAAGAAAAAAAAAAAAAGABgAAAAAAADAAQAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAA4AAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAwAAAwAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAdwAAAAAAAABwAAAAAAAAAAAA";
+    font_base64 += "AAADgAAAAGAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAYAcAAAAwAAAAAAAAAAAAAAAAAMAAAAAAAAAACAAYADA";
+    font_base64 += "AAAAAAAGAAAAAAAwAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAOEAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAA4ADAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAGAADgAAAAAA4AAAAAAAAAAAAAAAAAAHAADAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AABwAAAMAAAA4AYAAAAAAAAAAAAAAAAACAAQAAAAAAAAAAcAA4AAAAAAAAAAMAAAAAABgAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAYAAAAAAAAAAAAACABwMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAIAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAABgAGAAAAP7/AAAAAAAAAAAAAAAAAAAAAAAOwAE";
+    font_base64 += "AAAAAABwAAAAAAAAAAAAAAADgAAAAGAAAAAAAAAAAAAAAAAAAAAAAYAAAAAA4AMABAA4AAAAAAAAAAAAAAA";
+    font_base64 += "AAMAAAAAAAAAAAAByAAwAAAAAAADAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYAAAAAA";
+    font_base64 += "AAAAAAA4H8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgDwAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAID/AAAD/gMAAMD/HwAAAAAAAAAAAAAAAAAAAADAATgAAAAAAMABAAAAAAAAAAAAAAAAHAAAAAM";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAA4AAAAA/gA4AP4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHOAAAAAAAAAAHAA";
+    font_base64 += "AAAABwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOAAAAAAAAAAAAAAAOABAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8AEAAAAAAAAAAAAAAAAAAAAAAAAAAADwHwDgwH8AAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAcMADAAAAADA8AAAAAAAAAAAAAAAAgAMAAGAAAAAAAAAAAAAAAAAAAAAAAOAAAAAAgB8";
+    font_base64 += "AB8APAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAIAAAAAAAB4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPwfAAAAAAD+AwAA";
+    font_base64 += "AAAAAAAAAAAAAHAAAAAMAAAAAAAAAAAAAAAAAAAAAMAPAAAAAAAA4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD+AAAAAACAHwAAAAAAAAAAAAAAAAAOAACAAQAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAD4AAAAAAAAABwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    font_base64 += "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIADAAAAAAA=";
+
+    uint8_t font_data[1805 * 32 / 8];
+
+    int8_t b64invs[] = { 
+      62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 
+      61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 
+      8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 
+      22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28, 29,
+      30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 
+      44, 45, 46, 47, 48, 49, 50, 51 
+    };
+
+	  uint32_t i;
+	  uint32_t j;
+	  uint32_t v;
+
+	  for (i = 0, j = 0; i < font_base64.length(); i += 4, j += 3) {
+	  	v = b64invs[font_base64[i]-43];
+	  	v = (v << 6) | b64invs[font_base64[i+1]-43];
+
+	  	v = font_base64[i+2]=='=' ? v << 6 : (v << 6) | b64invs[font_base64[i+2]-43];
+	  	v = font_base64[i+3]=='=' ? v << 6 : (v << 6) | b64invs[font_base64[i+3]-43];
+
+	  	font_data[j] = (v >> 16) & 0xFF;
+
+	  	if (font_base64[i+2] != '=') {
+	  		font_data[j+1] = (v >> 8) & 0xFF;
+      }
+
+	  	if (font_base64[i+3] != '=') {
+	  	  font_data[j+2] = v & 0xFF;
+      }
+	  }
+
+    pFontSprite = new Sprite(1805, 32);
+
+    for (uint16_t m = 0; m < 1805 * 32; m++) {
+      pFontSprite->pBuffer[m].n = (font_data[m / 8] & (1 << (m % 8)) ? 0xFFFFFFFF : 0x00000000);
+    }
+  }
+
   void Application::Close() {
     pShouldExist = false;
   }
@@ -906,28 +1066,12 @@ namespace pixel {
     pDrawingMode = mode;
   }
 
-  void Application::CreateSprite(const std::string& filename) {
-    pSprites.push_back(Sprite(filename));
-    UpdateSprite(pSprites.size() - 1);
-  }
+  void Application::RegisterSprite(Sprite* spr) {
+    if (spr->pBufferId != 0xFFFFFFFF) pRenderer.DeleteTexture(spr->pBufferId);
 
-  void Application::CreateSprite(uint32_t w, uint32_t h) {
-    pSprites.push_back(Sprite(w, h));
-    UpdateSprite(pSprites.size() - 1);
-  }
-
-  Sprite* Application::GetSprite(uint32_t id) {
-    return &pSprites.at(id);
-  }
-
-  void Application::UpdateSprite(uint32_t id) {
-    Sprite* s = &pSprites.at(id);
-
-    if (s->pBufferId != 0xFFFFFFFF) pRenderer.DeleteTexture(s->pBufferId);
-
-    s->pBufferId = pRenderer.CreateTexture(s->pSize.x, s->pSize.y);
-    pRenderer.ApplyTexture(s->pBufferId);
-    pRenderer.UpdateTexture(s->pBufferId, s);
+    spr->pBufferId = pRenderer.CreateTexture(spr->pSize.x, spr->pSize.y);
+    pRenderer.ApplyTexture(spr->pBufferId);
+    pRenderer.UpdateTexture(spr->pBufferId, spr);
   }
 
   void Application::Draw(const vu2d& pos, const Pixel& pixel) {
@@ -1247,32 +1391,28 @@ namespace pixel {
     }
   }
 
-  void Application::DrawSprite(const vu2d& pos, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
-    Sprite& spr = pSprites.at(sprite);
-
+  void Application::DrawSprite(const vu2d& pos, Sprite* spr, const vf2d& scale, const Pixel& tint) {
     vf2d newpos = {
       (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
       ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
     };
 
     vf2d newsize = {
-      newpos.x + (2.0f * float(spr.pSize.x) * pInvScreenSize.x) * scale.x,
-      newpos.y - (2.0f * float(spr.pSize.y) * pInvScreenSize.y) * scale.y
+      newpos.x + (2.0f * float(spr->pSize.x) * pInvScreenSize.x) * scale.x,
+      newpos.y - (2.0f * float(spr->pSize.y) * pInvScreenSize.y) * scale.y
     };
 
-    spr.pTint = tint;
+    spr->pTint = tint;
 
-    spr.pPos[0] = { newpos.x, newpos.y };
-    spr.pPos[1] = { newpos.x, newsize.y };
-    spr.pPos[2] = { newsize.x, newsize.y };
-    spr.pPos[3] = { newsize.x, newpos.y };
+    spr->pPos[0] = { newpos.x, newpos.y };
+    spr->pPos[1] = { newpos.x, newsize.y };
+    spr->pPos[2] = { newsize.x, newsize.y };
+    spr->pPos[3] = { newsize.x, newpos.y };
 
-    pSpritesPending.push_back(&spr);
+    pSpritesPending.push_back(spr);
   }
 
-  void Application::DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, uint8_t sprite, const vf2d& scale, const Pixel& tint) {
-    Sprite& spr = pSprites.at(sprite);
-
+  void Application::DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, Sprite* spr, const vf2d& scale, const Pixel& tint) {
     vf2d newpos = {
       (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
       ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
@@ -1283,22 +1423,22 @@ namespace pixel {
       newpos.y - (2.0f * (float) ssize.y * pInvScreenSize.y) * scale.y
     };
 
-    spr.pTint = tint;
+    spr->pTint = tint;
 
-    spr.pPos[0] = { newpos.x, newpos.y };
-    spr.pPos[1] = { newpos.x, newsize.y };
-    spr.pPos[2] = { newsize.x, newsize.y };
-    spr.pPos[3] = { newsize.x, newpos.y };
+    spr->pPos[0] = { newpos.x, newpos.y };
+    spr->pPos[1] = { newpos.x, newsize.y };
+    spr->pPos[2] = { newsize.x, newsize.y };
+    spr->pPos[3] = { newsize.x, newpos.y };
 
-    vf2d uvtl = (vf2d) spos / (vf2d) spr.pSize * spr.pUvScale;
-    vf2d uvbr = uvtl + ((vf2d) ssize / (vf2d) spr.pSize * spr.pUvScale);
+    vf2d uvtl = (vf2d) spos / (vf2d) spr->pSize * spr->pUvScale;
+    vf2d uvbr = uvtl + ((vf2d) ssize / (vf2d) spr->pSize * spr->pUvScale);
 
-    spr.pUv[0] = {uvtl.x, uvtl.y };
-    spr.pUv[1] = {uvtl.x, uvbr.y };
-    spr.pUv[2] = {uvbr.x, uvbr.y };
-    spr.pUv[3] = {uvbr.x, uvtl.y };
+    spr->pUv[0] = {uvtl.x, uvtl.y };
+    spr->pUv[1] = {uvtl.x, uvbr.y };
+    spr->pUv[2] = {uvbr.x, uvbr.y };
+    spr->pUv[3] = {uvbr.x, uvtl.y };
 
-    pSpritesPending.push_back(&spr);
+    pSpritesPending.push_back(spr);
   }
 
   // void Application::DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White) {
@@ -1350,10 +1490,6 @@ namespace pixel {
     }
 
     pViewPos = (pWindowSize - pViewSize) / 2;
-  }
-
-  void Application::ConstructFontSheet() {
-    //! STUB: Implement function.
   }
 
   void Application::UpdateMouseState(uint32_t button, bool state) {
@@ -1451,21 +1587,6 @@ namespace pixel {
   Fn* fn(_Call&& c) {
       return fun<N>(std::forward<_Call>(c), (Fn*)nullptr);
   }
-
-  // Even easier with this macros!
-# define callback_c(lambda_body) fn([&](Application& app) lambda_body)
-# define callback(lambda_body) [](Application& app) lambda_body
-
-  /*
-  
-    ···
-    .on_update = callback({
-      return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
-    })
-    ···
-  
-  */
-
 }
 
 /*

@@ -8,7 +8,7 @@ int main() {
     .size = vu2d(512, 512), 
     .name = "Lines", 
     .clear_buffer = false,
-    .on_update = callback({
+    .on_update = [](Application& app){
       for (uint8_t i = 0; i < 50; i++) {
         app.DrawLine(
           vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
@@ -18,7 +18,7 @@ int main() {
       }
 
       return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
-    })
+    }
   });
 
   app.Launch();

@@ -8,7 +8,7 @@ int main() {
     .size = vu2d(500, 500),
     .name = "Application One",
     .clear_buffer = false,
-    .on_update = callback({
+    .on_update = fn([&](Application& app){
       for (uint8_t i = 0; i < 50; i++) {
         app.DrawLine(
           vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
@@ -25,7 +25,7 @@ int main() {
     .size = vu2d(500, 500),
     .name = "Application Two",
     .clear_buffer = false,
-    .on_update = callback({
+    .on_update = fn([&](Application& app){
       for (uint8_t i = 0; i < 50; i++) {
         app.DrawLine(
           vu2d(rand() % app.ScreenSize().x, rand() % app.ScreenSize().y),
