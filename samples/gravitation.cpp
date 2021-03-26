@@ -1,61 +1,124 @@
 #include <iostream>
 #include <cmath>
+#include <list>
+#include <iterator>
 
 #include <pixel/pixel.hpp>
 using namespace pixel;
 
-int main() {
-  vf2d p1(250, 250);
-  vf2d s1(0, 0);
-  vf2d a1(0, 0);
-  vf2d f1(0, 0);
+struct Particle {
+  vf2d p = {0, 0};   
+  vf2d s = {0, 0};   
+  vf2d a = {0, 0};
+  vf2d f = {0, 0};
+  float m = 0;  
+  float d = 0;
+};
 
-  float m1 = 10000;
-  float d1 = 0.005f;
+struct System {
+  std::vector<Particle> particles;
 
-  vf2d p2(350, 250);
-  vf2d s2(0, 30);
-  vf2d a2(0, 0);
-  vf2d f2(0, 0);
+  void Update(float et) {
+    for (auto& p1 : particles) {
+      for (auto& p2 : particles) {
+        if (&p1 != &p2) {
+          d = p1.p - p2.p;
 
-  float m2 = 100;
-  float d2 = 0.05f;
+	  	    r = sqrt((d.x * d.x) + (d.y * d.y));
+	  	    f = (g * p1.m * p2.m) / (r * r);
+	  	    t = atan(d.y / d.x);
 
-  float g = 10, s = 2;
+          p1.f += vf2d(cos(t), sin(t)) * f * (p2.p.x >= p1.p.x ? 1 : -1);
+          p2.f += vf2d(cos(t), sin(t)) * f * (p2.p.x >= p1.p.x ? -1 : 1);
+        }
+      }
+    }
 
-  vf2d d(0, 0);
+    for (auto& p : particles) {
+      p.a = p.f / p.m;
+      p.s += (p.a * et * s);
+      p.p += (p.s * et * s);
+      p.f = {0, 0};
+    }
+  }
+
+  float g = 0, s = 0;
   float r = 0, f = 0, t = 0;
+  vf2d d;
+};
 
+int main() {
+  System sys {
+    .g = 5,
+    .s = 2
+  };
+
+  sys.particles.push_back({
+    .p = {250, 250},
+    .s = {0, 0},
+    .a = {0, 0},
+    .f = {0, 0},
+    .m = 10000,
+    .d = 0.005f
+  });
+
+  sys.particles.push_back({
+    .p = {350, 250},
+    .s = {0, 30},
+    .a = {0, 0},
+    .f = {0, 0},
+    .m = 100,
+    .d = 0.05f
+  });
+
+  sys.particles.push_back({
+    .p = {150, 250},
+    .s = {0, -30},
+    .a = {0, 0},
+    .f = {0, 0},
+    .m = 100,
+    .d = 0.05f
+  });
+
+  sys.particles.push_back({
+    .p = {450, 250},
+    .s = {0, 20},
+    .a = {0, 0},
+    .f = {0, 0},
+    .m = 200,
+    .d = 0.05f
+  });
+
+  struct Trace {
+    vf2d p;
+    float t;
+  };
+
+  std::vector<Trace> traces;
+  
   Application app({
     .size = vu2d(500, 500),
     .name = "Gravitation",
-    .on_update = callback_c({
-      d = p1 - p2;
+    .on_update = fn([&](Application& app) {
+      sys.Update(app.et());
 
-	  	r = sqrt((d.x * d.x) + (d.y * d.y));
-	  	f = (g * m1 * m2) / (r * r);
-	  	t = atan(d.y / d.x);
+      for (decltype(traces)::iterator i = traces.begin(); i != traces.end(); ++i) {
+        i->t += app.et();
 
-      f1 = vf2d(cos(t), sin(t)) * f * (p2.x >= p1.x ? 1 : -1);
-      f2 = vf2d(cos(t), sin(t)) * f * (p2.x >= p1.x ? -1 : 1);
+        if (i->t > 2.0f) {
+          traces.erase(i); 
+          continue;
+        }
 
-      a1 = f1 / m1;
-      a2 = f2 / m2;
+        app.Draw(i->p, Pixel(0, 255, 255, 255 - (uint8_t)(i->t / 2.0f * 255.0f)));
+      }
 
-      s1 += (a1 * app.et() * s);
-      s2 += (a2 * app.et() * s);
-
-      p1 += (s1 * app.et() * s);
-      p2 += (s2 * app.et() * s);
-
-      app.FillCircle(p1, m1 * d1, White);
-      app.FillCircle(p2, m2 * d2, White);
-
-      app.DrawLine(p1, p1 + s1, Red);
-	  	app.DrawLine(p2, p2 + s2, Red);
-
-	  	app.DrawLine(p1, p1 + a1, Blue);
-	  	app.DrawLine(p2, p2 + a2, Blue);
+      for (auto& p : sys.particles) {
+        app.FillCircle(p.p, p.m * p.d, White);
+        app.DrawLine(p.p, p.p + p.s, Red);
+	  	  app.DrawLine(p.p, p.p + p.a, Blue);
+        traces.push_back({p.p, 0});
+      }
 
       return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
     })

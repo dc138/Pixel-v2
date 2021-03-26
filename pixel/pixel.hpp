@@ -405,6 +405,7 @@ namespace pixel {
     rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen);
     rcode SetWindowTitle(const std::string& s);
 
+    void  BeginEventLoop();
     rcode HandleSystemEvent();
 
     Application* App;
@@ -584,6 +585,7 @@ namespace pixel {
     Renderer pRenderer;
 
   private:
+    void pStartThread();
     void pEngineThread();
     void pConfigureSystem();
   };
@@ -735,6 +737,21 @@ namespace pixel {
 
   Application::~Application() {}
 
+  void Application::pStartThread() {
+    if (pPlatform.ApplicationStartUp() != rcode::ok) return;
+    if (pPlatform.CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return;
+
+    UpdateViewport();
+
+    pShouldExist = true;
+    std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+    
+    pPlatform.BeginEventLoop();
+    thread.join();
+
+    pHasBeenClosed = true;
+  }
+
   void Application::pEngineThread() {
     if (pPlatform.ThreadStartUp() == rcode::err) return;
     if (pPlatform.CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
@@ -856,20 +873,12 @@ namespace pixel {
 
     pPlatform.ThreadCleanUp();
     pPlatform.ApplicationCleanUp();
-
-    pHasBeenClosed = true;
   }
 
   rcode Application::Launch(bool background) {
     if (pHasBeenClosed) return rcode::abort;
 
-    if (pPlatform.ApplicationStartUp() != rcode::ok) return rcode::err;
-    if (pPlatform.CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return rcode::err;
-
-    UpdateViewport();
-
-    pShouldExist = true;
-    std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+    std::thread thread = std::thread(&pixel::Application::pStartThread, this);
     
     if (background) {
       thread.detach();
@@ -877,7 +886,7 @@ namespace pixel {
     } else {
       thread.join();
     }
-    
+
     return rcode::ok;
   }
 
@@ -1418,7 +1427,7 @@ namespace pixel {
         std::decay_t<_Call> callable;
     };
   
-    template<typename _Call, typename _Ret, typename... _Args>
+    template<int, typename _Call, typename _Ret, typename... _Args>
     auto fun(_Call&& c, _Ret (*)(_Args...)){
       static bool used = false;
       static storage<_Call> s;
@@ -1437,15 +1446,15 @@ namespace pixel {
     }
   }
 
-  // A very hackish way of allowing the user to pass an inline declared capturing lambda in the Application constructor
-  template<typename Fn = rcode(Application&), typename _Call>
+  // A very hackish way of allowing the user to pass an inline declared capturing lambda as a function pointer in the parameter list
+  template<typename Fn = rcode(Application&), int N = 0, typename _Call>
   Fn* fn(_Call&& c) {
-      return fun(std::forward<_Call>(c), (Fn*)nullptr);
+      return fun<N>(std::forward<_Call>(c), (Fn*)nullptr);
   }
 
   // Even easier with this macros!
 # define callback_c(lambda_body) fn([&](Application& app) lambda_body)
-# define callback(lambda_body) fn([](Application& app) lambda_body)
+# define callback(lambda_body) [](Application& app) lambda_body
 
   /*
   
@@ -1850,6 +1859,10 @@ namespace pixel {
   rcode Platform::SetWindowTitle(const std::string& s) {
     X11::XStoreName(pDisplay, pWindow, s.c_str());
     return rcode::ok;
+  }
+
+  void Platform::BeginEventLoop() {
+
   }
 
   rcode Platform::HandleSystemEvent() {
