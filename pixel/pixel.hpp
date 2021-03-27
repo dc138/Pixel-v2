@@ -299,7 +299,7 @@ namespace pixel {
     ~Sprite();
 
     friend class Application;
-    friend class Helper;
+    friend class FileUtil;
     friend class Renderer;
     friend class Platform;
 
@@ -315,11 +315,6 @@ namespace pixel {
     void SetPixel(uint32_t x, uint32_t y, const Pixel& p);
 
     vu2d GetSize() const;
-    void SetSize(uint32_t w, uint32_t h);
-
-  public:
-    rcode LoadFromFile(const std::string& filename);
-    rcode SaveToFile(const std::string& filename);
 
   public:
     void Swap(Sprite& other) noexcept;
@@ -337,7 +332,7 @@ namespace pixel {
     Pixel pTint = White;
   };
 
-  class Helper final {
+  class FileUtil final {
   public:
     static rcode LoadImage(Sprite* spr, const std::string& filename);
     static rcode SaveImage(Sprite* spr, const std::string& filename);
@@ -395,18 +390,18 @@ namespace pixel {
 #endif
 
   public:
-    rcode ApplicationStartUp();
-    rcode ApplicationCleanUp();
+    void ApplicationStartUp();
+    void ApplicationCleanUp();
 
-    rcode ThreadStartUp();
-    rcode ThreadCleanUp();
+    void ThreadStartUp();
+    void ThreadCleanUp();
 
     rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize);
     rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen);
-    rcode SetWindowTitle(const std::string& s);
+    void SetWindowTitle(const std::string& s);
 
-    void  BeginEventLoop();
-    rcode HandleSystemEvent();
+    void  BeginSystemEventLoop();
+    void HandleSystemEvent();
 
     Application* App;
   };
@@ -459,6 +454,8 @@ namespace pixel {
     void RegisterSprite(Sprite* spr);
 
   public:
+    void String(const vu2d& pos, std::string text, uint8_t size = 16);
+
     void Draw(const vu2d& pos, const Pixel& pixel);
     void DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel);
 
@@ -494,10 +491,7 @@ namespace pixel {
     void UpdateKeyFocus(bool state);
 
   public:
-    bool ShouldExist() const;
     pixel::DrawingMode DrawingMode() const;
-
-    vu2d DrawableSize() const;
     const vu2d& ScreenSize() const;
 
     const vu2d& WindowSize() const;
@@ -536,7 +530,7 @@ namespace pixel {
     Pixel pBufferColor = Black;
 
     std::atomic<bool> pHasBeenClosed {false};
-    std::atomic<bool> pShouldExist {false};
+    std::atomic<bool> pThreadRunning {false};
 
   private:
     vu2d pMousePos;
@@ -585,7 +579,6 @@ namespace pixel {
     void pStartThread();
     void pEngineThread();
     void pCreateFont();
-    void pConfigureSystem();
   };
 }
 
@@ -626,7 +619,7 @@ namespace pixel {
   }
 
   Sprite::Sprite(const std::string& filename) {
-    if (LoadFromFile(filename) != rcode::ok) throw std::exception();
+    if (FileUtil::LoadImage(this, filename) != rcode::ok) throw std::runtime_error(std::string("Cannot open: ") + filename);
   }
 
   Sprite::Sprite(const Sprite& src) :
@@ -680,19 +673,6 @@ namespace pixel {
     return pSize;
   }
 
-  void Sprite::SetSize(uint32_t w, uint32_t h) {
-    pSize = vu2d(w, h);
-  }
-
-  rcode Sprite::LoadFromFile(const std::string& filename) {
-    rcode code = Helper::LoadImage(this, filename);
-    return code;
-  }
-
-  rcode Sprite::SaveToFile(const std::string& filename) {
-    return Helper::SaveImage(this, filename);
-  }
-
   void Sprite::Swap(Sprite& other) noexcept {
     std::swap(pSize, other.pSize);
     std::swap(pUvScale, other.pUvScale);
@@ -709,7 +689,10 @@ namespace pixel {
 
 namespace pixel {
   Application::Application(Application::params_t params) {
-    pConfigureSystem();
+    if (params.scale <= 0|| params.size.x <= 0 || params.size.y <= 0) throw std::runtime_error("Invalid Application dimensions");
+
+    pPlatform.App = this;
+    pRenderer.App = this;
 
     pWindowSize = params.size * params.scale;
     pWindowPos = params.position;
@@ -740,22 +723,25 @@ namespace pixel {
   }
 
   void Application::pStartThread() {
-    if (pPlatform.ApplicationStartUp() != rcode::ok) return;
+    pPlatform.ApplicationStartUp();
+
     if (pPlatform.CreateWindowPane(pWindowPos, pWindowSize, pFullScreen) != rcode::ok) return;
+
+    pThreadRunning = true;
 
     UpdateViewport();
 
-    pShouldExist = true;
     std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
     
-    pPlatform.BeginEventLoop();
+    pPlatform.BeginSystemEventLoop();
     thread.join();
 
     pHasBeenClosed = true;
   }
 
   void Application::pEngineThread() {
-    if (pPlatform.ThreadStartUp() == rcode::err) return;
+    pPlatform.ThreadStartUp();
+
     if (pPlatform.CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
 
     RegisterSprite(pFontSprite);
@@ -772,11 +758,11 @@ namespace pixel {
     pClock2 = std::chrono::system_clock::now();
 
     if (pOnLaunch) {
-      if (pOnLaunch(*this) != rcode::ok) pShouldExist = false;
+      if (pOnLaunch(*this) != rcode::ok) pThreadRunning = false;
     }
 
-    while (pShouldExist) {
-      while (pShouldExist){
+    while (pThreadRunning) {
+      while (pThreadRunning){
         pClock2 = std::chrono::system_clock::now();
         pElapsedTimer = pClock2 - pClock1;
         pClock1 = pClock2;
@@ -841,7 +827,7 @@ namespace pixel {
         }
 
         if (pOnUpdate) {
-          if (pOnUpdate(*this) != rcode::ok) pShouldExist = false;
+          if (pOnUpdate(*this) != rcode::ok) pThreadRunning = false;
         }
 
         pRenderer.UpdateViewport(pViewPos, pViewSize);
@@ -862,7 +848,7 @@ namespace pixel {
       }
 
       if (pOnClose) {
-        if (pOnClose(*this) != rcode::ok) pShouldExist = true;
+        if (pOnClose(*this) != rcode::ok) pThreadRunning = true;
       }
     }
 
@@ -1051,7 +1037,7 @@ namespace pixel {
   }
 
   void Application::Close() {
-    pShouldExist = false;
+    pThreadRunning = false;
   }
 
   void Application::EnsureClosed() {
@@ -1508,16 +1494,8 @@ namespace pixel {
     pHasInputFocus = state;
   }
 
-  bool Application::ShouldExist() const {
-    return pShouldExist;
-  }
-
   pixel::DrawingMode Application::DrawingMode() const {
     return pDrawingMode;
-  }
-
-  vu2d Application::DrawableSize() const {
-    return pScreenSize - 1;
   }
 
   const vu2d& Application::ScreenSize() const {
@@ -1741,7 +1719,7 @@ namespace pixel {
   }
 
 
-  rcode Helper::LoadImage(Sprite* spr, const std::string& filename) {
+  rcode FileUtil::LoadImage(Sprite* spr, const std::string& filename) {
     //if (std::filesystem::exists(filename)) return rcode::file_err;
     if (spr->pBuffer != nullptr) delete[] spr->pBuffer;
 
@@ -1751,7 +1729,7 @@ namespace pixel {
     png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
 
     if (!png) {
-      spr->SetSize(0, 0);
+      spr->pSize = {0, 0};
       spr->pBuffer = nullptr;
 
       return rcode::err;
@@ -1760,14 +1738,14 @@ namespace pixel {
     info = png_create_info_struct(png);
 
     if (!info) {
-      spr->SetSize(0, 0);
+      spr->pSize = {0, 0};
       spr->pBuffer = nullptr;
 
       return rcode::err;
     }
 
     if (setjmp(png_jmpbuf(png))) {
-      spr->SetSize(0, 0);
+      spr->pSize = {0, 0};
       spr->pBuffer = nullptr;
 
       return rcode::err;
@@ -1783,7 +1761,7 @@ namespace pixel {
     png_byte bit_depth;
     png_bytep* row_pointers;
 
-    spr->SetSize(png_get_image_width(png, info), png_get_image_height(png, info));
+    spr->pSize = vu2d(png_get_image_width(png, info), png_get_image_height(png, info));
     color_type = png_get_color_type(png, info);
     bit_depth = png_get_bit_depth(png, info);
 
@@ -1832,31 +1810,28 @@ namespace pixel {
     return rcode::ok;
   }
 
-  rcode Helper::SaveImage(Sprite* spr, const std::string& filename) {
+  rcode FileUtil::SaveImage(Sprite* spr, const std::string& filename) {
     IGNORE(spr);
     IGNORE(filename);
 
     return rcode::ok;
   }
 
-  rcode Platform::ApplicationStartUp() {
-    return rcode::ok;
+  void Platform::ApplicationStartUp() {
+    
   }
 
-  rcode Platform::ApplicationCleanUp() {
+  void Platform::ApplicationCleanUp() {
     X11::XCloseDisplay(pDisplay);
     X11::XDestroyWindow(pDisplay, pWindow);
-    
-    return rcode::ok;
   }
 
-  rcode Platform::ThreadStartUp() {
-    return rcode::ok;
+  void Platform::ThreadStartUp() {
+
   }
 
-  rcode Platform::ThreadCleanUp() {
+  void Platform::ThreadCleanUp() {
     App->pRenderer.DestroyDevice();
-    return rcode::ok;
   }
 
   rcode Platform::CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) {
@@ -1977,16 +1952,15 @@ namespace pixel {
     return rcode::ok;
   }
 
-  rcode Platform::SetWindowTitle(const std::string& s) {
+  void Platform::SetWindowTitle(const std::string& s) {
     X11::XStoreName(pDisplay, pWindow, s.c_str());
-    return rcode::ok;
   }
 
-  void Platform::BeginEventLoop() {
+  void Platform::BeginSystemEventLoop() {
 
   }
 
-  rcode Platform::HandleSystemEvent() {
+  void Platform::HandleSystemEvent() {
     using namespace X11;
 
     XEvent event;
@@ -2053,8 +2027,6 @@ namespace pixel {
         App->UpdateWindowSize(xce.width, xce.height);
       }
     }
-
-    return rcode::ok;
   }
 }
 
@@ -2067,18 +2039,3 @@ namespace pixel {
 #ifdef PIXEL_MACOS
    #error "Currently unsupported platform."
 #endif /* PIXEL_MACOS */
-
-/*
-____________________________
-
-   Platform configuration
-____________________________
-
-*/
-
-namespace pixel {
-  void Application::pConfigureSystem() {
-    pPlatform.App = this;
-    pRenderer.App = this;
-  }
-}

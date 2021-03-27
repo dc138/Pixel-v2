@@ -6,7 +6,7 @@ BUILD    := ./build
 OBJ_DIR  := $(BUILD)
 BIN_DIR  := $(BUILD)/bin
 
-SRC      := samples/font.cpp # Change which sample you want to test here
+SRC      := samples/lines.cpp # Change which sample you want to test here
 HEADER   := pixel/pixel.hpp
 
 TARGET   := sample
