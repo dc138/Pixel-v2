@@ -6,7 +6,8 @@ int main() {
     .size = vu2d(512, 512), 
     .name = "Font",
     .on_update = fn([&](Application& app){
-      app.DrawSprite(vu2d(0, 0), app.pFontSprite, vf2d(0.5f, 0.5f));
+      app.DrawString({10, 10}, std::to_string(app.fps()));
+      app.DrawString(app.MousePos() + 10, to_string(app.MousePos()));
 
       return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
     })

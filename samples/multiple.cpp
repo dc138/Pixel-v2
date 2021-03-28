@@ -41,7 +41,6 @@ int main() {
   app1.Launch(true);
   app2.Launch(true);
 
-
   app1.EnsureClosed();
   app2.EnsureClosed();
 

@@ -96,6 +96,10 @@ int main() {
 
   std::vector<Trace> traces;
   
+  bool show_pos = false;
+  bool show_vel = false;
+  bool show_acc = false;
+
   Application app({
     .size = vu2d(512, 512),
     .name = "Gravitation",
@@ -117,8 +121,17 @@ int main() {
         app.FillCircle(p.p, p.m * p.d, White);
         app.DrawLine(p.p, p.p + p.s, Red);
 	  	  app.DrawLine(p.p, p.p + p.a, Blue);
+
         traces.push_back({p.p, 0});
+
+        if (show_pos) app.DrawString(p.p + 10, to_string(p.p), 8, Grey);
+        if (show_vel) app.DrawString(p.p + 10, to_string(p.s), 8, Grey);
+        if (show_acc) app.DrawString(p.p + 10, to_string(p.a), 8, Grey);
       }
+
+      show_pos = app.Key(Key::P).pressed ? !show_pos : show_pos;
+      show_vel = app.Key(Key::V).pressed ? !show_vel : show_vel;
+      show_acc = app.Key(Key::A).pressed ? !show_acc : show_acc;
 
       return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
     })

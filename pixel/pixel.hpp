@@ -242,6 +242,8 @@ namespace pixel {
   typedef v2d<double  > vd2d;
   typedef v2d<float   > vf2d;
 
+  template<typename T> std::string to_string(const v2d<T>& vector) { return std::to_string(vector.x) + ", " + std::to_string(vector.y); }
+
   struct Pixel {
     union {
       uint32_t n = 0x000000FF;
@@ -325,11 +327,15 @@ namespace pixel {
 
     Pixel* pBuffer = nullptr;
     uint32_t pBufferId = 0xFFFFFFFF;
+  };
 
+  struct SpriteRef {
+    Sprite* pSprite;
+    Pixel pTint = White;
+    
     vf2d pPos[4] = { vf2d(0.0f, 0.0f), vf2d(0.0f, 0.0f), vf2d(0.0f, 0.0f), vf2d(0.0f, 0.0f) };
     vf2d pUv[4] = { vf2d(0.0f, 0.0f), vf2d(0.0f, 1.0f), vf2d(1.0f, 1.0f), vf2d(1.0f, 0.0f) };
     float pW[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    Pixel pTint = White;
   };
 
   class FileUtil final {
@@ -361,7 +367,7 @@ namespace pixel {
     void DisplayFrame();
     void PrepareDrawing();
     void DrawLayerQuad();
-    void DrawDecalQuad(const Sprite& sprite);
+    void DrawDecalQuad(const SpriteRef& sprite);
 
     uint32_t CreateTexture(uint32_t width, uint32_t height);
     uint32_t DeleteTexture(uint32_t id);
@@ -454,10 +460,9 @@ namespace pixel {
     void RegisterSprite(Sprite* spr);
 
   public:
-    void String(const vu2d& pos, std::string text, uint8_t size = 16);
-
     void Draw(const vu2d& pos, const Pixel& pixel);
     void DrawLine(const vu2d& pos1, const vu2d& pos2, const Pixel& pixel);
+    void DrawString(const vu2d& pos, std::string_view text, uint8_t size = 8, const Pixel& color = White);
 
     void DrawCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel);
     void FillCircle(const vu2d& pos, uint32_t radius, const Pixel& pixel);
@@ -558,14 +563,12 @@ namespace pixel {
     uint32_t pFrameRate = 0;
 
   private:
+    Sprite* pFontSprite;
     Pixel* pBuffer = nullptr;
     uint32_t pBufferId = 0xFFFFFFFF;
 
-    std::vector<Sprite*> pSpritesPending;
+    std::vector<SpriteRef> pSpritesPending;
     pixel::DrawingMode pDrawingMode = pixel::DrawingMode::NO_ALPHA;
-
-  public:
-    Sprite* pFontSprite;
 
   private:
     callback_t pOnLaunch;
@@ -625,11 +628,7 @@ namespace pixel {
   Sprite::Sprite(const Sprite& src) :
     pSize(src.pSize),
     pUvScale(src.pUvScale),
-    pBufferId(src.pBufferId),
-    pPos(src.pPos),
-    pUv(src.pUv),
-    pW{src.pW[0], src.pW[1], src.pW[2], src.pW[3]},
-    pTint(src.pTint) {
+    pBufferId(src.pBufferId) {
 
     pBuffer = new Pixel[src.pSize.prod()];
 
@@ -679,11 +678,6 @@ namespace pixel {
 
     std::swap(pBuffer, other.pBuffer);
     std::swap(pBufferId, other.pBufferId);
-
-    std::swap(pPos, other.pPos);
-    std::swap(pUv, other.pUv);
-    std::swap(pW, other.pW);
-    std::swap(pTint, other.pTint);
   }
 }
 
@@ -839,8 +833,8 @@ namespace pixel {
         pRenderer.DrawLayerQuad();
 
         for (auto& s : pSpritesPending) {
-          pRenderer.ApplyTexture(s->pBufferId);
-          pRenderer.DrawDecalQuad(*s);
+          pRenderer.ApplyTexture(s.pSprite->pBufferId);
+          pRenderer.DrawDecalQuad(s);
         }
 
         pSpritesPending.clear();
@@ -1012,11 +1006,11 @@ namespace pixel {
 	  uint32_t v;
 
 	  for (i = 0, j = 0; i < font_base64.length(); i += 4, j += 3) {
-	  	v = b64invs[font_base64[i]-43];
-	  	v = (v << 6) | b64invs[font_base64[i+1]-43];
+	  	v = b64invs[font_base64[i] - 43];
+	  	v = (v << 6) | b64invs[font_base64[i+1] - 43];
 
-	  	v = font_base64[i+2]=='=' ? v << 6 : (v << 6) | b64invs[font_base64[i+2]-43];
-	  	v = font_base64[i+3]=='=' ? v << 6 : (v << 6) | b64invs[font_base64[i+3]-43];
+	  	v = font_base64[i+2] == '=' ? v << 6 : (v << 6) | b64invs[font_base64[i+2] - 43];
+	  	v = font_base64[i+3] == '=' ? v << 6 : (v << 6) | b64invs[font_base64[i+3] - 43];
 
 	  	font_data[j] = (v >> 16) & 0xFF;
 
@@ -1056,8 +1050,25 @@ namespace pixel {
     if (spr->pBufferId != 0xFFFFFFFF) pRenderer.DeleteTexture(spr->pBufferId);
 
     spr->pBufferId = pRenderer.CreateTexture(spr->pSize.x, spr->pSize.y);
-    pRenderer.ApplyTexture(spr->pBufferId);
     pRenderer.UpdateTexture(spr->pBufferId, spr);
+  }
+
+  void Application::DrawString(const vu2d& pos, std::string_view text, uint8_t size, const Pixel& color) {
+    vu2d p = pos;
+
+    for (const char& c : text) {
+      if (isascii(c) > 0) {
+        if (c == '\n') {
+          p.y += size;
+          p.x = pos.x;
+
+          continue;
+        }
+
+        DrawPartialSprite(p, vu2d((c - 32) * 19, 0), vu2d(19, 32), pFontSprite, vf2d((float) size / 32.0f, (float) size / 32.0f), color);
+        p.x += (float) size * 0.6f;
+      }
+    }
   }
 
   void Application::Draw(const vu2d& pos, const Pixel& pixel) {
@@ -1070,11 +1081,12 @@ namespace pixel {
       float a = (float) (pixel.v.a / 255.0f);
       float c = 1.0f - a;
 
-      float r = a * (float) pixel.v.r + c * (float) d.v.r;
-      float g = a * (float) pixel.v.g + c * (float) d.v.g;
-      float b = a * (float) pixel.v.b + c * (float) d.v.b;
+      uint8_t r = a * (float) pixel.v.r + c * (float) d.v.r;
+      uint8_t g = a * (float) pixel.v.g + c * (float) d.v.g;
+      uint8_t b = a * (float) pixel.v.b + c * (float) d.v.b;
 
-      pBuffer[pos.y * pScreenSize.x + pos.x].n = (uint8_t)r | ((uint8_t)g << 8) | ((uint8_t)b << 16) | (255 << 24);
+      pBuffer[pos.y * pScreenSize.x + pos.x].v = { r, g, b, 255 };
+      //pBuffer[pos.y * pScreenSize.x + pos.x].n = (uint8_t)r | ((uint8_t)g << 8) | ((uint8_t)b << 16) | (255 << 24);
 
     } else if (pDrawingMode == DrawingMode::NO_ALPHA) {
       pBuffer[pos.y * pScreenSize.x + pos.x] = pixel;
@@ -1378,6 +1390,9 @@ namespace pixel {
   }
 
   void Application::DrawSprite(const vu2d& pos, Sprite* spr, const vf2d& scale, const Pixel& tint) {
+    SpriteRef spr_ref;
+    spr_ref.pSprite = spr;
+
     vf2d newpos = {
       (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
       ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
@@ -1388,17 +1403,20 @@ namespace pixel {
       newpos.y - (2.0f * float(spr->pSize.y) * pInvScreenSize.y) * scale.y
     };
 
-    spr->pTint = tint;
+    spr_ref.pTint = tint;
 
-    spr->pPos[0] = { newpos.x, newpos.y };
-    spr->pPos[1] = { newpos.x, newsize.y };
-    spr->pPos[2] = { newsize.x, newsize.y };
-    spr->pPos[3] = { newsize.x, newpos.y };
+    spr_ref.pPos[0] = { newpos.x, newpos.y };
+    spr_ref.pPos[1] = { newpos.x, newsize.y };
+    spr_ref.pPos[2] = { newsize.x, newsize.y };
+    spr_ref.pPos[3] = { newsize.x, newpos.y };
 
-    pSpritesPending.push_back(spr);
+    pSpritesPending.push_back(spr_ref);
   }
 
   void Application::DrawPartialSprite(const vu2d& pos, const vu2d& spos, const vu2d& ssize, Sprite* spr, const vf2d& scale, const Pixel& tint) {
+    SpriteRef spr_ref;
+    spr_ref.pSprite = spr;
+
     vf2d newpos = {
       (float(pos.x) * pInvScreenSize.x) * 2.0f - 1.0f,
       ((float(pos.y) * pInvScreenSize.y) * 2.0f - 1.0f) * -1.0f
@@ -1409,22 +1427,22 @@ namespace pixel {
       newpos.y - (2.0f * (float) ssize.y * pInvScreenSize.y) * scale.y
     };
 
-    spr->pTint = tint;
+    spr_ref.pTint = tint;
 
-    spr->pPos[0] = { newpos.x, newpos.y };
-    spr->pPos[1] = { newpos.x, newsize.y };
-    spr->pPos[2] = { newsize.x, newsize.y };
-    spr->pPos[3] = { newsize.x, newpos.y };
+    spr_ref.pPos[0] = { newpos.x, newpos.y };
+    spr_ref.pPos[1] = { newpos.x, newsize.y };
+    spr_ref.pPos[2] = { newsize.x, newsize.y };
+    spr_ref.pPos[3] = { newsize.x, newpos.y };
 
     vf2d uvtl = (vf2d) spos / (vf2d) spr->pSize * spr->pUvScale;
     vf2d uvbr = uvtl + ((vf2d) ssize / (vf2d) spr->pSize * spr->pUvScale);
 
-    spr->pUv[0] = {uvtl.x, uvtl.y };
-    spr->pUv[1] = {uvtl.x, uvbr.y };
-    spr->pUv[2] = {uvbr.x, uvbr.y };
-    spr->pUv[3] = {uvbr.x, uvtl.y };
+    spr_ref.pUv[0] = { uvtl.x, uvtl.y };
+    spr_ref.pUv[1] = { uvtl.x, uvbr.y };
+    spr_ref.pUv[2] = { uvbr.x, uvbr.y };
+    spr_ref.pUv[3] = { uvbr.x, uvtl.y };
 
-    pSpritesPending.push_back(spr);
+    pSpritesPending.push_back(spr_ref);
   }
 
   // void Application::DrawWarpedSprite(uint8_t sprite, std::array<vf2d, 4>& pos, const Pixel& tint = White) {
@@ -1634,7 +1652,7 @@ namespace pixel {
     glEnd();
   }
 
-  void Renderer::DrawDecalQuad(const Sprite& sprite) {
+  void Renderer::DrawDecalQuad(const SpriteRef& sprite) {
     glBegin(GL_QUADS);
 
     glColor4ub(sprite.pTint.v.r, sprite.pTint.v.g, sprite.pTint.v.b, sprite.pTint.v.a);
