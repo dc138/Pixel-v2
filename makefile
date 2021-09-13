@@ -1,12 +1,12 @@
 CXX      := g++
 CXXFLAGS := -pedantic-errors -Wall -std=c++20 -I. -m64
-LDFLAGS  := -lX11 -lGL -lpthread -lpng -lstdc++
+LDFLAGS  := -lGL -lpthread -lpng -lstdc++ -lglfw
 
 BUILD    := ./build
 OBJ_DIR  := $(BUILD)
 BIN_DIR  := $(BUILD)/bin
 
-SRC      := samples/font.cpp # Change which sample you want to test here
+SRC      := samples/gravitation.cpp # Change which sample you want to test here
 HEADER   := pixel/pixel.hpp
 
 TARGET   := sample
