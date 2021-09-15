@@ -122,6 +122,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <iostream>
 #include <istream>
 #include <map>
 #include <string>
@@ -844,8 +845,6 @@ namespace pixel {
   }
 
   void Application::pEngineThread() {
-    pPlatform.ThreadStartUp();
-
     if (pPlatform.CreateGraphics(pFullScreen, pVsync, pViewPos, pViewSize) == rcode::err) return;
 
     RegisterSprite(pFontSprite);
@@ -963,7 +962,6 @@ namespace pixel {
     delete[] pBuffer;
     pRenderer.DeleteTexture(pBufferId);
 
-    pPlatform.ThreadCleanUp();
     pHasBeenClosed = true;
   }
 
@@ -1981,6 +1979,22 @@ namespace pixel {
     pWindow = glfwCreateWindow(winsize.x, winsize.y, "Pixel Engine", NULL, NULL);
     glfwSetWindowPos(pWindow, winpos.x, winpos.y);
 
+    // This is a bit messy, but it works
+    glfwSetWindowSizeCallback(pWindow, fn<void(GLFWwindow*, int, int)>([&](GLFWwindow* window, int width, int height) {
+                                App->pWindowSize.x = width;
+                                App->pWindowSize.y = height;
+                                App->UpdateViewport();
+                              }));
+    glfwSetWindowPosCallback(pWindow, fn<void(GLFWwindow*, int, int)>([&](GLFWwindow* window, int posx, int posy) {
+                               App->pWindowPos.x = posx;
+                               App->pWindowPos.y = posy;
+                             }));
+    glfwSetCursorPosCallback(pWindow,
+                             fn<void(GLFWwindow*, double, double)>([&](GLFWwindow* window, double posx, double posy) {
+                               App->pMousePos = (vi2d(posx, posy) - App->pViewPos) / App->pScale;
+                               std::cout << "Mouse pos: " << App->MousePos().x << ", " << App->MousePos().y << "\n";
+                             }));
+
     return rcode::ok;
   }
 
@@ -1988,12 +2002,12 @@ namespace pixel {
 
   void Platform::StartSystemEventLoop() {
     while (!App->pHasBeenClosed) {
+      App->pWantsToClose = glfwWindowShouldClose(pWindow);
       glfwPollEvents();
     }
   }
 
   void Platform::HandleSystemEvent() {
     // TODO: Handle window resizing, mouse and keyboard
-    App->pWantsToClose = glfwWindowShouldClose(pWindow);
   }
 }
