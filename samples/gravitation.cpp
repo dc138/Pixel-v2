@@ -50,11 +50,8 @@ int main() {
   System sys {.g = 5, .s = 2};
 
   sys.particles.push_back({.p = {250, 250}, .s = {0, 0}, .a = {0, 0}, .f = {0, 0}, .m = 10000, .d = 0.005f});
-
   sys.particles.push_back({.p = {350, 250}, .s = {0, 30}, .a = {0, 0}, .f = {0, 0}, .m = 100, .d = 0.05f});
-
   sys.particles.push_back({.p = {150, 250}, .s = {0, -30}, .a = {0, 0}, .f = {0, 0}, .m = 100, .d = 0.05f});
-
   sys.particles.push_back({.p = {450, 250}, .s = {0, 20}, .a = {0, 0}, .f = {0, 0}, .m = 200, .d = 0.05f});
 
   struct Trace {

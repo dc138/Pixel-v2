@@ -463,7 +463,6 @@ namespace pixel {
     friend class Application;
 
     rcode CreateDevice(GLFWwindow* window, bool fullscreen, bool vsync);
-    void  DestroyDevice();
 
     void DisplayFrame();
     void PrepareDrawing();
@@ -492,13 +491,11 @@ namespace pixel {
     void ApplicationStartUp();
     void ApplicationCleanUp();
 
-    void ThreadStartUp();
-    void ThreadCleanUp();
-
     rcode CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize);
     rcode CreateWindowPane(const vu2d& winpos, vu2d& winsize, bool fullscreen);
     void  SetWindowTitle(const std::string& s);
 
+    void StartSystemEventLoop();
     void HandleSystemEvent();
 
    private:
@@ -840,10 +837,10 @@ namespace pixel {
     UpdateViewport();
 
     std::thread thread = std::thread(&pixel::Application::pEngineThread, this);
+    thread.detach();
 
-    thread.join();
-
-    pHasBeenClosed = true;
+    pPlatform.StartSystemEventLoop();
+    pPlatform.ApplicationCleanUp();
   }
 
   void Application::pEngineThread() {
@@ -967,7 +964,7 @@ namespace pixel {
     pRenderer.DeleteTexture(pBufferId);
 
     pPlatform.ThreadCleanUp();
-    pPlatform.ApplicationCleanUp();
+    pHasBeenClosed = true;
   }
 
   rcode Application::Launch(bool background) {
@@ -1766,8 +1763,6 @@ namespace pixel {
     return pixel::ok;
   }
 
-  void Renderer::DestroyDevice() { glfwMakeContextCurrent(pWindow); }
-
   void Renderer::DisplayFrame() { glfwSwapBuffers(pWindow); }
 
   void Renderer::PrepareDrawing() {
@@ -1970,14 +1965,8 @@ namespace pixel {
 
   void Platform::ApplicationCleanUp() {
     glfwDestroyWindow(pWindow);
-
-    pWindow = NULL;
     glfwTerminate();
   }
-
-  void Platform::ThreadStartUp() {}
-
-  void Platform::ThreadCleanUp() { App->pRenderer.DestroyDevice(); }
 
   rcode Platform::CreateGraphics(bool fullscreen, bool vsync, const vu2d& viewpos, const vu2d& viewsize) {
     if (App->pRenderer.CreateDevice(pWindow, fullscreen, vsync) == rcode::ok) {
@@ -1997,9 +1986,14 @@ namespace pixel {
 
   void Platform::SetWindowTitle(const std::string& s) { glfwSetWindowTitle(pWindow, s.c_str()); }
 
+  void Platform::StartSystemEventLoop() {
+    while (!App->pHasBeenClosed) {
+      glfwPollEvents();
+    }
+  }
+
   void Platform::HandleSystemEvent() {
     // TODO: Handle window resizing, mouse and keyboard
-    glfwPollEvents();
     App->pWantsToClose = glfwWindowShouldClose(pWindow);
   }
 }
