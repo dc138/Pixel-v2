@@ -1177,7 +1177,7 @@ namespace pixel {
     }
   }
 
-  void Application::Close() { pWantsToClose = false; }
+  void Application::Close() { pWantsToClose = true; }
 
   void Application::EnsureClosed() {
     while (!pHasBeenClosed) {
@@ -1692,23 +1692,6 @@ namespace pixel {
   //   //! STUB: Implement function.
   // }
 
-  void Application::UpdateMouse(uint32_t x, uint32_t y) {
-    pHasMouseFocus = true;
-
-    x -= pViewPos.x;
-    y -= pViewPos.y;
-
-    pMousePos.x = (((float)x / (float)(pWindowSize.x - (pViewPos.x * 2)) * (float)pScreenSize.x));
-    pMousePos.y = (((float)y / (float)(pWindowSize.y - (pViewPos.y * 2)) * (float)pScreenSize.y));
-  }
-
-  void Application::UpdateMouseWheel(uint32_t delta) { pMouseWheel += delta; }
-
-  void Application::UpdateWindowSize(uint32_t x, uint32_t y) {
-    pWindowSize = vu2d(x, y);
-    UpdateViewport();
-  }
-
   void Application::UpdateViewport() {
     uint32_t ww   = pScreenSize.x * pScale;
     uint32_t wh   = pScreenSize.y * pScale;
@@ -1724,11 +1707,6 @@ namespace pixel {
 
     pViewPos = (pWindowSize - pViewSize) / 2;
   }
-
-  void Application::UpdateMouseState(uint32_t button, bool state) { pMouseButtonsNew[button] = state; }
-  void Application::UpdateKeyState(uint32_t key, bool state) { pKeyboardKeysNew[key] = state; }
-  void Application::UpdateMouseFocus(bool state) { pHasMouseFocus = state; }
-  void Application::UpdateKeyFocus(bool state) { pHasInputFocus = state; }
 
   pixel::DrawingMode Application::DrawingMode() const { return pDrawingMode; }
 
