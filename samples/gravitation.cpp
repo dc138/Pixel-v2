@@ -94,11 +94,11 @@ int main() {
           if (show_acc) app.DrawString(p.p + 10, to_string(p.a), 8, Grey);
         }
 
-        show_pos = app.Key(Key::P).pressed ? !show_pos : show_pos;
-        show_vel = app.Key(Key::V).pressed ? !show_vel : show_vel;
-        show_acc = app.Key(Key::A).pressed ? !show_acc : show_acc;
+        show_pos = app.Key(Key::KEY_P).pressed ? !show_pos : show_pos;
+        show_vel = app.Key(Key::KEY_V).pressed ? !show_vel : show_vel;
+        show_acc = app.Key(Key::KEY_A).pressed ? !show_acc : show_acc;
 
-        return app.Key(Key::ESCAPE).pressed ? pixel::quit : pixel::ok;
+        return app.Key(Key::KEY_ESCAPE).pressed ? pixel::quit : pixel::ok;
       }),
   });
 
